@@ -8,8 +8,6 @@
       "config": {
         "distDir": "dist/client"
       }
-
-      }
     },
     {
       "src": "server/index.ts",
