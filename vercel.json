@@ -1,0 +1,23 @@
+{
+  "version": 3,
+  "builds": [
+    {
+      "src": "vite.config.ts",
+      "use": "@vercel/static-build",
+      "config": {
+        "distDir": "dist/client"
+      }
+    },
+    {
+      "src": "server/index.ts",
+      "use": "@vercel/node",
+      "config": {
+        "includeFiles": ["dist/client/**"]
+      }
+    }
+  ],
+  "routes": [
+    { "src": "/api/(.*)", "dest": "server/index.ts" },
+    { "handle": "filesystem" }
+  ]
+}
