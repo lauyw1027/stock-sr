@@ -1,5 +1,10 @@
 import { build as esbuild } from "esbuild";
-import { build as viteBuild } from "vite";
+import { webcrypto } from "node:crypto";
+import crypto from "node:crypto";
+if (typeof (crypto as any).getRandomValues !== "function") {
+  (crypto as any).getRandomValues = webcrypto.getRandomValues.bind(webcrypto);
+}
+// Vite build will be imported dynamically
 import { rm, readFile } from "node:fs/promises";
 
 // server deps to bundle to reduce openat(2) syscalls
@@ -35,7 +40,11 @@ async function buildAll() {
   await rm("dist", { recursive: true, force: true });
 
   console.log("building client...");
-  await viteBuild();
+  if (!(globalThis as any).crypto) {
+    (globalThis as any).crypto = webcrypto;
+  }
+  const { build: viteBuild } = await import("vite");
+await viteBuild();
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));
