@@ -18,7 +18,7 @@
     }
   ],
   "routes": [
-    { "src": "/api/(.*)", "dest": "server/index.ts" },
+    { "src": "/api/(.*)", "dest": "dist/index.cjs" },
     { "handle": "filesystem" }
   ]
 }
