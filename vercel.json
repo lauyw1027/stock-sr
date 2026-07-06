@@ -2,10 +2,13 @@
   "version": 2,
   "builds": [
     {
-      "src": "vite.config.ts",
+      "src": "package.json",
       "use": "@vercel/static-build",
+      "buildCommand": "npm run vercel-build",
       "config": {
         "distDir": "dist/client"
+      }
+
       }
     },
     {
