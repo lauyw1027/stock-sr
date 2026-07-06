@@ -28,6 +28,7 @@ const allowlist = [
   "xlsx",
   "zod",
   "zod-validation-error",
+    "yahoo-finance2",
 ];
 
 async function buildAll() {
