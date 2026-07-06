@@ -4,7 +4,7 @@
     {
       "src": "package.json",
       "use": "@vercel/static-build",
-      "buildCommand": "npm run vercel-build",
+
       "config": {
         "distDir": "dist/client"
       }
