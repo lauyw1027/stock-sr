@@ -10,7 +10,7 @@
       }
     },
     {
-      "src": "server/index.ts",
+      "src": "dist/index.cjs",
       "use": "@vercel/node",
       "config": {
         "includeFiles": ["dist/client/**"]
