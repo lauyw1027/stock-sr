@@ -10,6 +10,11 @@ import {
   type AnalyzeResult,
 } from "./analysis";
 
+// Health check endpoint for debugging
+app.get("/api/health", (_req: Request, res: Response) => {
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
+});
+
 // yahoo-finance2 v3 需要實例化；suppressNotices 關閉調查/環境通知
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
 const yahooFinance = new YahooFinance({

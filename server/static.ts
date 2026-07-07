@@ -4,7 +4,8 @@ import fs from "node:fs";
 import path from "node:path";
 
 export function serveStatic(app: Express) {
-  const distPath = path.resolve(__dirname, "public");
+  // Vite builds to dist/client, not dist/public
+  const distPath = path.resolve(__dirname, "client");
   if (!fs.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`,
