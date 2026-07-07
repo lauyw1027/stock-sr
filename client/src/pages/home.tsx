@@ -125,6 +125,16 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Google AdSense */}
+      <div className=" py-2 text-center">
+        <ins className="adsbygoogle"
+          style={{ display: 'block', minHeight: '90px' }}
+          data-ad-client="ca-pub-5616423133058703"
+          data-ad-slot="1234567890"
+          data-ad-format="horizontal"
+          data-full-width-responsive="true"></ins>
+      </div>
+
       <main className="mx-auto max-w-6xl px-4 py-6 space-y-6">
         {/* 輸入區 */}
         <Card className="p-5">
