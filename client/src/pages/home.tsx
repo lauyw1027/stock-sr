@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -263,6 +263,9 @@ export default function Home() {
 
       <footer className="border-t border-border mt-10">
         <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-muted-foreground space-y-1">
+          <p className="text-center text-muted-foreground">
+            © {new Date().getFullYear()} <strong className="text-foreground">Stocksr</strong> — 支撐阻力技術分析工具
+          </p>
           <p>
             <strong className="text-foreground">風險聲明：</strong>
             本工具僅為技術分析與教育用途，非投資建議。資料來源 Yahoo Finance，可能有延遲或誤差。
