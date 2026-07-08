@@ -1,4 +1,5 @@
 import { useState, useMemo } from "react";
+import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Button } from "@/components/ui/button";
@@ -114,7 +115,7 @@ export default function Home() {
       <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
         <div className="mx-auto max-w-6xl px-4 py-4 flex items-center gap-3">
           <Logo />
-          <div>
+          <div className="flex-1">
             <h1 className="text-lg font-semibold tracking-tight" data-testid="text-app-title">
               支撐阻力技術分析
             </h1>
@@ -122,6 +123,11 @@ export default function Home() {
               Yahoo Finance 日線 OHLCV · 多方法共振 · 教育用途
             </p>
           </div>
+          <Link href="/about">
+            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              關於
+            </a>
+          </Link>
         </div>
       </header>
 
