@@ -128,6 +128,11 @@ export default function Home() {
               關於
             </a>
           </Link>
+          <Link href="/ath-atl">
+            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              ATH/ATL
+            </a>
+          </Link>
         </div>
       </header>
 

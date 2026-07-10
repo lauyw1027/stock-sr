@@ -9,6 +9,7 @@ import {
   type Candle,
   type AnalyzeResult,
 } from "./analysis";
+import { scanAthAtl, getCachedData } from "./stocks";
 
 // yahoo-finance2 v3 需要實例化；suppressNotices 關閉調查/環境通知
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
@@ -187,6 +188,47 @@ export async function registerRoutes(
         message: "分析過程發生錯誤，請稍後再試或確認代號。",
         detail: (e?.message || "").toString().slice(0, 300),
       });
+    }
+  });
+
+  // ATH/ATL API
+  app.get("/api/ath-atl", async (_req: Request, res: Response) => {
+    try {
+      const type = _req.query.type as string || "all"; // all, ath, atl
+      const exchange = _req.query.exchange as string || "all"; // all, NYSE, NASDAQ, AMEX, HK, T, SS, SZ, TW, TWO, L, KS
+      const refresh = _req.query.refresh === "true";
+      
+      let data = getCachedData();
+      
+      // 如果沒有快取或是要求強制刷新，則重新掃描
+      if (!data || refresh) {
+        console.log(`[API] Scanning ATH/ATL (refresh: ${refresh})`);
+        data = await scanAthAtl();
+      }
+      
+      let result = {
+        ath: data.ath,
+        atl: data.atl,
+        lastUpdated: data.lastUpdated,
+      };
+      
+      // 過濾交易所 (支援美股和國際市場)
+      if (exchange !== "all") {
+        result.ath = result.ath.filter(s => s.exchange === exchange);
+        result.atl = result.atl.filter(s => s.exchange === exchange);
+      }
+      
+      // 過濾類型
+      if (type === "ath") {
+        result.atl = [];
+      } else if (type === "atl") {
+        result.ath = [];
+      }
+      
+      res.json(result);
+    } catch (e: any) {
+      console.error("[API] ATH/ATL error:", e);
+      res.status(500).json({ error: "Failed to fetch ATH/ATL data", detail: e.message });
     }
   });
 
