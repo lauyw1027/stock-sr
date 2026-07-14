@@ -20,6 +20,7 @@ export interface ATHATLRecord {
   symbol: string;
   company_name: string;
   exchange: string;
+  industry: string;
   last_close: number;
   ath_price: number | null;
   ath_date: string | null;
@@ -27,8 +28,13 @@ export interface ATHATLRecord {
   atl_date: string | null;
   change_pct: number;
   volume: number;
-  list_type: "ATH" | "ATL";
+  list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
 }
+
+// 52週新高/新低快取
+let cached52wData: { ath52w: ATHATLRecord[]; atl52w: ATHATLRecord[]; lastUpdated: string } | null = null;
+let cached52wDataTime = 0;
+const CACHE_TTL_MS = 15 * 60 * 1000; // 15 minutes cache
 
 // 從 API 獲取股票清單或使用備用清單
 let US_STOCKS: StockInfo[] = [];
@@ -292,7 +298,9 @@ const EXPANDED_STOCKS: StockInfo[] = [
 ];
 
 let cachedData: { ath: ATHATLRecord[]; atl: ATHATLRecord[]; lastUpdated: string } | null = null;
+let cachedDataTime = 0;
 let isScanning = false;
+let isScanning52w = false;
 
 export function getUSStocks(): StockInfo[] {
   const stocks = US_STOCKS.length > 0 ? US_STOCKS : EXPANDED_STOCKS;
@@ -305,8 +313,32 @@ export function getUSStocks(): StockInfo[] {
   });
 }
 
-export async function scanAthAtl(): Promise<{ ath: ATHATLRecord[]; atl: ATHATLRecord[]; lastUpdated: string }> {
-  if (isScanning) {
+// Track if initial cache warming is complete
+let cacheWarmingComplete = false;
+
+export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRecord[]; atl: ATHATLRecord[]; lastUpdated: string }> {
+  const now = Date.now();
+  
+  if (!forceRefresh && cachedData && cachedDataTime && (now - cachedDataTime) < CACHE_TTL_MS) {
+    console.log(`[ATH-ATL] Using cached data (age: ${Math.round((now - cachedDataTime) / 1000)}s)`);
+    return cachedData;
+  }
+  
+  // Wait for initial cache warming if still in progress
+  if (isScanning && !forceRefresh) {
+    console.log("[ATH-ATL] Waiting for initial scan to complete...");
+    // Wait up to 60 seconds for initial scan
+    const startWait = Date.now();
+    while (isScanning && (Date.now() - startWait) < 60000) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (cachedData) {
+      console.log("[ATH-ATL] Returning data after waiting for initial scan");
+      return cachedData;
+    }
+  }
+  
+  if (isScanning && !cachedData) {
     console.log("[ATH-ATL] Scan already in progress, returning cached data");
     return cachedData || { ath: [], atl: [], lastUpdated: "" };
   }
@@ -321,8 +353,8 @@ export async function scanAthAtl(): Promise<{ ath: ATHATLRecord[]; atl: ATHATLRe
   const stocksToScan = getUSStocks();
   console.log(`[ATH-ATL] Starting scan for ${stocksToScan.length} stocks...`);
 
-  // 批量處理，每批 10 個
-  const batchSize = 10;
+  // 批量處理，每批 25 個 (increased from 10)
+  const batchSize = 25;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[ATH-ATL] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
@@ -355,7 +387,9 @@ export async function scanAthAtl(): Promise<{ ath: ATHATLRecord[]; atl: ATHATLRe
   results.atl.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
 
   cachedData = results;
+  cachedDataTime = Date.now();
   isScanning = false;
+  cacheWarmingComplete = true;
 
   console.log(`[ATH-ATL] Scan complete: ${results.ath.length} ATH, ${results.atl.length} ATL`);
 
@@ -373,10 +407,14 @@ export async function scanAthAtl(): Promise<{ ath: ATHATLRecord[]; atl: ATHATLRe
 
 async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
   try {
-    // 獲取完整歷史數據
+    // 獲取過去 5 年數據足夠計算 ATH/ATL (更快)
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 5);
+
     const hist = await yahooFinance.historical(stock.symbol, {
-      period1: "1990-01-01", // 從足夠早的時間開始
-      period2: new Date().toISOString().split("T")[0],
+      period1: startDate.toISOString().split("T")[0],
+      period2: endDate.toISOString().split("T")[0],
       interval: "1d",
     });
 
@@ -459,4 +497,181 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
 
 export function getCachedData(): { ath: ATHATLRecord[]; atl: ATHATLRecord[]; lastUpdated: string } | null {
   return cachedData;
+}
+
+// 52週新高/新低掃描
+export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATHATLRecord[]; atl52w: ATHATLRecord[]; lastUpdated: string }> {
+  const now = Date.now();
+  if (!forceRefresh && cached52wData && cached52wDataTime && (now - cached52wDataTime) < CACHE_TTL_MS) {
+    console.log(`[52W] Using cached data (age: ${Math.round((now - cached52wDataTime) / 1000)}s)`);
+    return cached52wData;
+  }
+
+  // Wait for initial cache warming if still in progress
+  if (isScanning52w && !forceRefresh) {
+    console.log("[52W] Waiting for initial scan to complete...");
+    const startWait = Date.now();
+    while (isScanning52w && (Date.now() - startWait) < 60000) {
+      await new Promise(r => setTimeout(r, 1000));
+    }
+    if (cached52wData) {
+      console.log("[52W] Returning data after waiting for initial scan");
+      return cached52wData;
+    }
+  }
+
+  const results: { ath52w: ATHATLRecord[]; atl52w: ATHATLRecord[]; lastUpdated: string } = {
+    ath52w: [],
+    atl52w: [],
+    lastUpdated: new Date().toISOString(),
+  };
+
+  isScanning52w = true;
+  const stocksToScan = getUSStocks();
+  console.log(`[52W] Starting scan for ${stocksToScan.length} stocks...`);
+
+  // 批量處理
+  const batchSize = 10;
+  for (let i = 0; i < stocksToScan.length; i += batchSize) {
+    const batch = stocksToScan.slice(i, i + batchSize);
+    console.log(`[52W] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
+    
+    const promises = batch.map(async (stock) => {
+      try {
+        const result = await scanSingleStock52w(stock);
+        return result;
+      } catch (e) {
+        console.error(`[52W] Error scanning ${stock.symbol}:`, e);
+        return null;
+      }
+    });
+
+    const batchResults = await Promise.all(promises);
+    
+    for (const r of batchResults) {
+      if (r) {
+        if (r.list_type === "52W_ATH" && r.ath_price !== null) {
+          results.ath52w.push(r);
+        } else if (r.list_type === "52W_ATL" && r.atl_price !== null) {
+          results.atl52w.push(r);
+        }
+      }
+    }
+  }
+
+  // 按漲跌幅排序
+  results.ath52w.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+  results.atl52w.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
+
+  cached52wData = results;
+  cached52wDataTime = Date.now();
+  isScanning52w = false;
+  console.log(`[52W] Scan complete: ${results.ath52w.length} 52W ATH, ${results.atl52w.length} 52W ATL`);
+
+  // Save to file cache
+  const cachePath = path.resolve(__dirname, "../../data/52w-cache.json");
+  try {
+    fs.mkdirSync(path.dirname(cachePath), { recursive: true });
+    fs.writeFileSync(cachePath, JSON.stringify({ ...results, cachedAt: cached52wDataTime }, null, 2));
+  } catch (e) {
+    console.error("[52W] Failed to save cache:", e);
+  }
+
+  return results;
+}
+
+async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null> {
+  try {
+    // 獲取過去2年的數據以確保涵蓋52週
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 2);
+
+    const hist = await yahooFinance.historical(stock.symbol, {
+      period1: startDate.toISOString().split("T")[0],
+      period2: endDate.toISOString().split("T")[0],
+      interval: "1d",
+    });
+
+    if (!hist || hist.length < 50) {
+      return null;
+    }
+
+    // 依日期排序
+    hist.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // 取得過去52週（約252個交易日）的數據
+    const last252Days = hist.slice(-252);
+    if (last252Days.length < 50) {
+      return null;
+    }
+
+    const latestData = hist[hist.length - 1];
+    const previousData = hist.length >= 2 ? hist[hist.length - 2] : null;
+
+    if (!latestData || !latestData.close) {
+      return null;
+    }
+
+    // 計算52週最高/最低價
+    const highs52w = last252Days.map((d) => d.high);
+    const lows52w = last252Days.map((d) => d.low);
+    const high52w = Math.max(...highs52w);
+    const low52w = Math.min(...lows52w);
+
+    // 找出52週新高/新低的日期
+    const high52wDateEntry = last252Days.find((d) => d.high === high52w);
+    const low52wDateEntry = last252Days.find((d) => d.low === low52w);
+
+    // 判斷是否在最近5天內觸及52週新高/新低
+    const lastFiveDays = hist.slice(-5);
+    const recentHighs = lastFiveDays.map((d) => d.high);
+    const recentLows = lastFiveDays.map((d) => d.low);
+
+    const is52wATH = recentHighs.some((h) => h >= high52w);
+    const is52wATL = recentLows.some((l) => l <= low52w);
+
+    if (!is52wATH && !is52wATL) {
+      return null;
+    }
+
+    const changePct = previousData
+      ? ((latestData.close - previousData.close) / previousData.close) * 100
+      : 0;
+
+    if (is52wATH) {
+      return {
+        symbol: stock.symbol,
+        company_name: stock.companyName,
+        exchange: stock.exchange,
+        industry: "",
+        last_close: latestData.close,
+        ath_price: high52w,
+        ath_date: high52wDateEntry ? new Date(high52wDateEntry.date).toISOString().split("T")[0] : null,
+        atl_price: null,
+        atl_date: null,
+        change_pct: Math.round(changePct * 100) / 100,
+        volume: latestData.volume || 0,
+        list_type: "52W_ATH",
+      };
+    } else {
+      return {
+        symbol: stock.symbol,
+        company_name: stock.companyName,
+        exchange: stock.exchange,
+        industry: "",
+        last_close: latestData.close,
+        ath_price: null,
+        ath_date: null,
+        atl_price: low52w,
+        atl_date: low52wDateEntry ? new Date(low52wDateEntry.date).toISOString().split("T")[0] : null,
+        change_pct: Math.round(changePct * 100) / 100,
+        volume: latestData.volume || 0,
+        list_type: "52W_ATL",
+      };
+    }
+  } catch (e) {
+    console.error(`[52W] Error fetching ${stock.symbol}:`, e);
+    return null;
+  }
 }

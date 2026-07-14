@@ -3,6 +3,8 @@ import type { Express } from 'express';
 import fs from "node:fs";
 import path from "node:path";
 
+const __dirname = path.dirname(__filename);
+
 export function serveStatic(app: Express) {
   // Vite builds to dist/client, not dist/public
   const distPath = path.resolve(__dirname, "client");

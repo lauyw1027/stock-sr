@@ -27,6 +27,7 @@ interface ATHATLRecord {
   symbol: string;
   company_name: string;
   exchange: string;
+  industry: string;
   last_close: number;
   ath_price: number | null;
   ath_date: string | null;
@@ -34,14 +35,19 @@ interface ATHATLRecord {
   atl_date: string | null;
   change_pct: number;
   volume: number;
-  list_type: "ATH" | "ATL";
+  list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
 }
 
 interface ATHATLResponse {
   ath: ATHATLRecord[];
   atl: ATHATLRecord[];
+  ath52w: ATHATLRecord[];
+  atl52w: ATHATLRecord[];
   lastUpdated: string;
+  lastUpdated52w: string;
 }
+
+type TabType = "ath" | "atl" | "52w_ath" | "52w_atl";
 
 type SortField = "change_pct" | "volume" | "ath_date" | "atl_date";
 type SortOrder = "asc" | "desc";
@@ -49,11 +55,18 @@ type SortOrder = "asc" | "desc";
 const EXCHANGES = ["all", "NYSE", "NASDAQ", "AMEX"] as const;
 
 export default function ATHATLPage() {
-  const [activeTab, setActiveTab] = useState<"ath" | "atl">("ath");
+  const [activeTab, setActiveTab] = useState<TabType>("ath");
   const [search, setSearch] = useState("");
   const [exchange, setExchange] = useState<string>("all");
-  const [sortField, setSortField] = useState<SortField>("change_pct");
+  const getDefaultSortField = (tab: TabType): SortField => {
+    if (tab === "ath" || tab === "52w_ath") return "ath_date";
+    return "atl_date";
+  };
+  
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  
+  // 根據 activeTab 決定排序欄位
+  const sortField: SortField = activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date";
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -65,12 +78,36 @@ export default function ATHATLPage() {
   });
 
   // 自動在元件 mount 時獲取資料
+  // 如果回傳空陣列，自動重試一次（可能是伺服器正在快取暖機）
   useEffect(() => {
     mutation.mutate();
   }, []);
 
+  // Auto-retry if data is empty (server might be warming cache)
+  useEffect(() => {
+    if (mutation.isSuccess && 
+        mutation.data && 
+        mutation.data.ath.length === 0 && 
+        mutation.data.atl.length === 0 && 
+        mutation.data.ath52w.length === 0 && 
+        mutation.data.atl52w.length === 0 &&
+        mutation.failureCount < 2) {
+      const timer = setTimeout(() => {
+        console.log("[ATH-ATL] Empty data received, retrying...");
+        mutation.mutate();
+      }, 3000);
+      return () => clearTimeout(timer);
+    }
+  }, [mutation.isSuccess, mutation.data, mutation.failureCount]);
+
   const data = mutation.data;
-  const records = activeTab === "ath" ? data?.ath || [] : data?.atl || [];
+  const records = activeTab === "ath" 
+    ? data?.ath || [] 
+    : activeTab === "atl" 
+    ? data?.atl || []
+    : activeTab === "52w_ath" 
+    ? data?.ath52w || []
+    : data?.atl52w || [];
 
   const filteredAndSorted = useMemo(() => {
     let result = [...records];
@@ -114,7 +151,7 @@ export default function ATHATLPage() {
     });
 
     return result;
-  }, [records, search, sortField, sortOrder]);
+  }, [records, search, sortOrder, activeTab]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -187,6 +224,22 @@ export default function ATHATLPage() {
               >
                 <TrendingDown className="w-4 h-4 mr-1" />
                 ATL (歷史新低)
+              </Button>
+              <Button
+                variant={activeTab === "52w_ath" ? "default" : "outline"}
+                onClick={() => setActiveTab("52w_ath")}
+                className={activeTab === "52w_ath" ? "bg-green-600 hover:bg-green-700" : ""}
+              >
+                <TrendingUp className="w-4 h-4 mr-1" />
+                52週新高
+              </Button>
+              <Button
+                variant={activeTab === "52w_atl" ? "default" : "outline"}
+                onClick={() => setActiveTab("52w_atl")}
+                className={activeTab === "52w_atl" ? "bg-red-600 hover:bg-red-700" : ""}
+              >
+                <TrendingDown className="w-4 h-4 mr-1" />
+                52週新低
               </Button>
             </div>
 
@@ -284,7 +337,11 @@ export default function ATHATLPage() {
                       <TableHead>公司名稱</TableHead>
                       <TableHead>交易所</TableHead>
                       <TableHead className="text-right">價格</TableHead>
-                      <TableHead className="text-right">{activeTab === "ath" ? "近5日歷史新高" : "近5日歷史新低"}</TableHead>
+                      <TableHead className="text-right">
+                        {activeTab === "ath" || activeTab === "52w_ath" 
+                          ? (activeTab === "ath" ? "近5日歷史新高" : "52週新高")
+                          : (activeTab === "atl" ? "近5日歷史新低" : "52週新低")}
+                      </TableHead>
                       <TableHead className="text-right">漲跌幅</TableHead>
                       <TableHead className="text-right">成交量</TableHead>
                       <TableHead className="text-right">創建日期</TableHead>
@@ -311,7 +368,7 @@ export default function ATHATLPage() {
                           {formatPrice(record.last_close)}
                         </TableCell>
                         <TableCell className="text-right font-mono">
-                          {activeTab === "ath"
+                          {(activeTab === "ath" || activeTab === "52w_ath")
                             ? formatPrice(record.ath_price || 0)
                             : formatPrice(record.atl_price || 0)}
                         </TableCell>
@@ -331,7 +388,7 @@ export default function ATHATLPage() {
                           {formatVolume(record.volume)}
                         </TableCell>
                         <TableCell className="text-right">
-                          {activeTab === "ath"
+                          {(activeTab === "ath" || activeTab === "52w_ath")
                             ? formatDate(record.ath_date)
                             : formatDate(record.atl_date)}
                         </TableCell>

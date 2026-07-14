@@ -64,6 +64,19 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
 
+  // Pre-warm ATH/ATL cache on server startup
+  setTimeout(async () => {
+    console.log("[Startup] Pre-warming ATH/ATL cache...");
+    try {
+      const { scanAthAtl, scan52wAthAtl } = await import("./stocks");
+      await scanAthAtl(false);
+      await scan52wAthAtl(false);
+      console.log("[Startup] Cache pre-warming complete");
+    } catch (e) {
+      console.error("[Startup] Cache pre-warming failed:", e);
+    }
+  }, 2000);
+
   app.use((err: any, _req: Request, res: Response, next: NextFunction) => {
     const status = err.status || err.statusCode || 500;
     const message = err.message || "Internal Server Error";

@@ -9,7 +9,9 @@ import {
   type Candle,
   type AnalyzeResult,
 } from "./analysis";
-import { scanAthAtl, getCachedData } from "./stocks";
+import { scanAthAtl, getCachedData, scan52wAthAtl } from "./stocks";
+import { analyzeDivergence, fetchCandles, type Timeframe, type DivergenceResult, type InsufficientDataError, type ScanResult } from "./divergence";
+import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./divergence-scan";
 
 // yahoo-finance2 v3 需要實例化；suppressNotices 關閉調查/環境通知
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
@@ -191,44 +193,182 @@ export async function registerRoutes(
     }
   });
 
-  // ATH/ATL API
+  // ATH/ATL API (包含52週新高/新低)
   app.get("/api/ath-atl", async (_req: Request, res: Response) => {
     try {
-      const type = _req.query.type as string || "all"; // all, ath, atl
-      const exchange = _req.query.exchange as string || "all"; // all, NYSE, NASDAQ, AMEX, HK, T, SS, SZ, TW, TWO, L, KS
+      const type = _req.query.type as string || "all"; // all, ath, atl, ath52w, atl52w
+      const exchange = _req.query.exchange as string || "all";
       const refresh = _req.query.refresh === "true";
       
+      // 取得 ATH/ATL 資料
       let data = getCachedData();
-      
-      // 如果沒有快取或是要求強制刷新，則重新掃描
       if (!data || refresh) {
         console.log(`[API] Scanning ATH/ATL (refresh: ${refresh})`);
-        data = await scanAthAtl();
+        data = await scanAthAtl(refresh);
       }
+      
+      // 取得52週資料
+      const data52w = await scan52wAthAtl(refresh);
       
       let result = {
         ath: data.ath,
         atl: data.atl,
+        ath52w: data52w.ath52w,
+        atl52w: data52w.atl52w,
         lastUpdated: data.lastUpdated,
+        lastUpdated52w: data52w.lastUpdated,
       };
       
-      // 過濾交易所 (支援美股和國際市場)
+      // 過濾交易所
       if (exchange !== "all") {
         result.ath = result.ath.filter(s => s.exchange === exchange);
         result.atl = result.atl.filter(s => s.exchange === exchange);
+        result.ath52w = result.ath52w.filter(s => s.exchange === exchange);
+        result.atl52w = result.atl52w.filter(s => s.exchange === exchange);
       }
       
       // 過濾類型
       if (type === "ath") {
         result.atl = [];
+        result.ath52w = [];
+        result.atl52w = [];
       } else if (type === "atl") {
         result.ath = [];
+        result.ath52w = [];
+        result.atl52w = [];
+      } else if (type === "ath52w") {
+        result.ath = [];
+        result.atl = [];
+        result.atl52w = [];
+      } else if (type === "atl52w") {
+        result.ath = [];
+        result.atl = [];
+        result.ath52w = [];
       }
       
       res.json(result);
     } catch (e: any) {
       console.error("[API] ATH/ATL error:", e);
       res.status(500).json({ error: "Failed to fetch ATH/ATL data", detail: e.message });
+    }
+  });
+
+  // ============= Divergence API =============
+  
+  // 全市場掃描結果（日線/週線）
+  app.get("/api/divergence/scan", async (req: Request, res: Response) => {
+    try {
+      const timeframe = (req.query.timeframe as Timeframe) || "1d";
+      const type = req.query.type as "bullish" | "bearish" | undefined;
+      const exchange = req.query.exchange as string || "all";
+      const strength = req.query.strength as "weak" | "moderate" | "strong" | "very_strong" | undefined;
+      const minStrength = req.query.minStrength as "weak" | "moderate" | "strong" | "very_strong" | undefined;
+      const refresh = req.query.refresh === "true";
+      
+      // 驗證 timeframe
+      if (timeframe !== "1d" && timeframe !== "1wk") {
+        return res.status(400).json({ error: "Invalid timeframe. Use 1d or 1wk for scan API." });
+      }
+      
+      // 獲取快取數據
+      const cacheData = await scanAllStocks(timeframe, refresh);
+      
+      // 過濾結果
+      let results = cacheData.results;
+      if (type) {
+        results = filterDivergenceResults(results, { type });
+      }
+      if (exchange !== "all") {
+        results = filterDivergenceResults(results, { exchange });
+      }
+      if (minStrength) {
+        results = filterDivergenceResults(results, { minStrength });
+      } else if (strength) {
+        results = filterDivergenceResults(results, { strength });
+      }
+      
+      res.json({
+        results,
+        total: results.length,
+        lastUpdated: cacheData.lastUpdated,
+        timeframe,
+      });
+    } catch (e: any) {
+      console.error("[API] Divergence scan error:", e);
+      res.status(500).json({ error: "Failed to fetch divergence scan data", detail: e.message });
+    }
+  });
+  
+  // 單股即時查詢（30分鐘/1小時）
+  app.get("/api/divergence/symbol", async (req: Request, res: Response) => {
+    // 防止 CDN/瀏覽器快取導致 304 Not Modified
+    res.setHeader("Cache-Control", "no-cache, no-store, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+    
+    try {
+      const symbol = (req.query.symbol as string || "").toUpperCase().trim();
+      const timeframe = (req.query.timeframe as Timeframe) || "30m";
+      
+      if (!symbol) {
+        return res.status(400).json({ error: "Symbol is required" });
+      }
+      
+      // 驗證 timeframe
+      const validTimeframes = ["30m", "60m", "1d", "1wk"];
+      if (!validTimeframes.includes(timeframe)) {
+        return res.status(400).json({ error: "Invalid timeframe. Use 30m, 60m, 1d, or 1wk." });
+      }
+      
+      // 不同 timeframe 需要的最小 K 線數
+      const minBars = timeframe === "1d" || timeframe === "1wk" ? 50 : 20;
+      
+      // 抓取即時資料
+      const candles = await fetchCandles(symbol, timeframe);
+      
+      if (candles.length < minBars) {
+        return res.status(200).json({
+          status: "insufficient_data",
+          message: `資料不足，僅有 ${candles.length} 根K線，需要至少 ${minBars} 根`,
+          symbol,
+          timeframe,
+          bars_available: candles.length,
+          bars_required: minBars,
+        });
+      }
+      
+      // 計算背離
+      const result = analyzeDivergence(symbol, symbol, "Unknown", timeframe, candles);
+      
+      if ("status" in result && (result.status === "insufficient_data" || result.status === "no_divergence")) {
+        return res.status(200).json(result);
+      }
+      
+      // 成功結果
+      const divResult = result as DivergenceResult;
+      return res.json({
+        symbol: divResult.symbol,
+        company_name: divResult.company_name,
+        exchange: divResult.exchange,
+        timeframe: divResult.timeframe,
+        divergence_type: divResult.divergence_type,
+        strength: divResult.strength,
+        matched_indicators: divResult.matched_indicators,
+        matched_count: divResult.matched_count,
+        last_close: divResult.last_close,
+        swing_price_1: divResult.swing_price_1,
+        swing_price_2: divResult.swing_price_2,
+        swing_date_1: divResult.swing_date_1,
+        swing_date_2: divResult.swing_date_2,
+        updated_at: divResult.updated_at,
+      });
+    } catch (e: any) {
+      console.error("[API] Divergence symbol error:", e);
+      res.status(500).json({ 
+        error: "fetch_failed", 
+        message: `無法從 Yahoo Finance 取得「${req.query.symbol}」的資料，請確認代號是否正確。`,
+        detail: (e?.message || "").toString().slice(0, 200),
+      });
     }
   });
 

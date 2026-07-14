@@ -33,7 +33,7 @@ const allowlist = [
   "xlsx",
   "zod",
   "zod-validation-error",
-    "yahoo-finance2",
+  "yahoo-finance2",
 ];
 
 async function buildAll() {
@@ -44,7 +44,7 @@ async function buildAll() {
     (globalThis as any).crypto = webcrypto;
   }
   const { build: viteBuild } = await import("vite");
-await viteBuild();
+  await viteBuild();
 
   console.log("building server...");
   const pkg = JSON.parse(await readFile("package.json", "utf-8"));

@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Slider } from "@/components/ui/slider";
 import {
   Select,
   SelectContent,
@@ -32,6 +33,7 @@ import {
   Download,
   Activity,
   Layers,
+  Filter,
 } from "lucide-react";
 import type {
   AnalyzeResult,
@@ -131,6 +133,11 @@ export default function Home() {
           <Link href="/ath-atl">
             <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
               ATH/ATL
+            </a>
+          </Link>
+          <Link href="/divergence">
+            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              背離掃描
             </a>
           </Link>
         </div>
@@ -298,6 +305,38 @@ function ResultView({
   const s = result.status;
   const i = result.indicators;
 
+  // 過濾選項
+  const [showFilters, setShowFilters] = useState(false);
+  const [priceFilterPct, setPriceFilterPct] = useState(50); // 預設 50% 以內
+  const [strengthFilter, setStrengthFilter] = useState<string>("all");
+
+  const currentPrice = s.currentPrice ?? 0;
+
+  // 過濾 zones
+  const strengthOrder = { "強": 3, "中": 2, "弱": 1 };
+  const filterZones = (zones: Zone[]) => {
+    if (!currentPrice) return zones;
+    return zones.filter((z) => {
+      const zoneCenter = (z.low + z.high) / 2;
+      const distancePct = Math.abs((zoneCenter - currentPrice) / currentPrice) * 100;
+      if (distancePct > priceFilterPct) return false;
+      if (strengthFilter !== "all") {
+        const selectedStrength = strengthOrder[strengthFilter as keyof typeof strengthOrder] || 0;
+        const zoneStrength = strengthOrder[z.strength as keyof typeof strengthOrder] || 0;
+        if (zoneStrength < selectedStrength) return false;
+      }
+      return true;
+    });
+  };
+
+  const filteredResistance = filterZones(result.resistanceZones);
+  const filteredSupport = filterZones(result.supportZones);
+  const filteredConfluence = filterZones(result.confluenceZones);
+
+  const resistanceFiltered = result.resistanceZones.length - filteredResistance.length;
+  const supportFiltered = result.supportZones.length - filteredSupport.length;
+  const confluenceFiltered = result.confluenceZones.length - filteredConfluence.length;
+
   const exportReport = (type: "json" | "csv" | "md") => {
     const base = `${s.ticker}_支撐阻力分析`;
     if (type === "json") downloadBlob(toJSON(result), `${base}.json`, "application/json");
@@ -312,7 +351,51 @@ function ResultView({
         <h2 className="text-xl font-semibold tracking-tight" data-testid="text-result-title">
           {s.companyName} <span className="text-muted-foreground font-mono text-base">({s.ticker})</span> 支撐阻力分析
         </h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <div className="flex gap-2 items-center">
+            {showFilters && (
+              <div className="flex gap-2 items-center text-sm">
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">價格範圍：</Label>
+                  <Select value={priceFilterPct.toString()} onValueChange={(v) => setPriceFilterPct(Number(v))}>
+                    <SelectTrigger className="w-28 h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10% 以內</SelectItem>
+                      <SelectItem value="20">20% 以內</SelectItem>
+                      <SelectItem value="30">30% 以內</SelectItem>
+                      <SelectItem value="50">50% 以內</SelectItem>
+                      <SelectItem value="100">100% 以內</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Label className="text-xs text-muted-foreground">強度：</Label>
+                  <Select value={strengthFilter} onValueChange={setStrengthFilter}>
+                    <SelectTrigger className="w-24 h-8">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">全部</SelectItem>
+                      <SelectItem value="強">強</SelectItem>
+                      <SelectItem value="中">中及以上</SelectItem>
+                      <SelectItem value="弱">弱</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+            <Button
+              variant={showFilters ? "default" : "outline"}
+              size="sm"
+              onClick={() => setShowFilters(!showFilters)}
+              className={showFilters ? "bg-blue-600 hover:bg-blue-700" : ""}
+            >
+              <Filter className="mr-1.5 h-3.5 w-3.5" />
+              過濾
+            </Button>
+          </div>
           <Button variant="outline" size="sm" onClick={() => exportReport("md")} data-testid="button-export-md">
             <Download className="mr-1.5 h-3.5 w-3.5" /> Markdown
           </Button>
@@ -392,21 +475,21 @@ function ResultView({
       {/* 阻力區 */}
       <Card className="p-5">
         <SectionTitle icon={<TrendingUp className="h-4 w-4 text-destructive" />}>阻力區（由近到遠）</SectionTitle>
-        <ZoneTable zones={result.resistanceZones} cur={cur} kind="resistance" emptyMsg="上方無足夠資料形成阻力區（N/A）" />
+        <ZoneTable zones={filteredResistance} cur={cur} kind="resistance" emptyMsg="上方無足夠資料形成阻力區（N/A）" />
       </Card>
 
       {/* 支撐區 */}
       <Card className="p-5">
         <SectionTitle icon={<TrendingDown className="h-4 w-4 text-primary" />}>支撐區（由近到遠）</SectionTitle>
-        <ZoneTable zones={result.supportZones} cur={cur} kind="support" emptyMsg="下方無足夠資料形成支撐區（N/A）" />
+        <ZoneTable zones={filteredSupport} cur={cur} kind="support" emptyMsg="下方無足夠資料形成支撐區（N/A）" />
       </Card>
 
       {/* 共振關卡 */}
       <Card className="p-5">
         <SectionTitle icon={<Layers className="h-4 w-4" />}>共振關卡</SectionTitle>
-        {result.confluenceZones.length ? (
+        {filteredConfluence.length ? (
           <div className="space-y-3">
-            {result.confluenceZones.map((z, idx) => (
+            {filteredConfluence.map((z, idx) => (
               <div
                 key={idx}
                 className="rounded-md border border-border bg-background/50 p-3 text-sm"
@@ -431,7 +514,9 @@ function ResultView({
           </div>
         ) : (
           <p className="text-sm text-muted-foreground" data-testid="text-no-confluence">
-            無明確共振關卡（沒有兩種以上方法在 1% 範圍內重疊）。
+            {result.confluenceZones.length > 0 && filteredConfluence.length === 0
+              ? "無符合篩選條件的共振關卡"
+              : "無明確共振關卡（沒有兩種以上方法在 1% 範圍內重疊）"}
           </p>
         )}
       </Card>

@@ -9,6 +9,7 @@ import NotFound from "@/pages/not-found";
 import Home from "@/pages/home";
 import About from "@/pages/about";
 import ATHATL from "@/pages/ath-atl";
+import Divergence from "@/pages/divergence";
 
 function AppRouter() {
   return (
@@ -16,6 +17,7 @@ function AppRouter() {
       <Route path="/" component={Home} />
       <Route path="/about" component={About} />
       <Route path="/ath-atl" component={ATHATL} />
+      <Route path="/divergence" component={Divergence} />
       <Route component={NotFound} />
     </Switch>
   );

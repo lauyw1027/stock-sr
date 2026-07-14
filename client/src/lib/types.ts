@@ -106,3 +106,53 @@ export interface ErrorResponse {
 }
 
 export type ApiResponse = AnalyzeResult | AmbiguousResponse | ErrorResponse;
+
+// ============= Divergence Types =============
+
+export type Timeframe = "30m" | "60m" | "1d" | "1wk";
+export type DivergenceType = "bullish" | "bearish";
+export type Strength = "weak" | "moderate" | "strong" | "very_strong";
+
+export interface DivergenceResult {
+  symbol: string;
+  company_name: string;
+  exchange: string;
+  timeframe: Timeframe;
+  divergence_type: DivergenceType;
+  strength: Strength;
+  matched_indicators: string[];
+  matched_count: number;
+  last_close: number;
+  swing_price_1: number;
+  swing_price_2: number;
+  swing_date_1: string;
+  swing_date_2: string;
+  updated_at: string;
+}
+
+export interface DivergenceScanResponse {
+  results: DivergenceResult[];
+  total: number;
+  lastUpdated: string;
+  timeframe: Timeframe;
+}
+
+export interface DivergenceInsufficientData {
+  status: "insufficient_data";
+  message: string;
+  symbol: string;
+  timeframe: Timeframe;
+  bars_available: number;
+  bars_required: number;
+}
+
+export interface DivergenceNoDivergence {
+  status: "no_divergence";
+  message: string;
+  symbol: string;
+  timeframe: Timeframe;
+  bars_available: number;
+  bars_required: number;
+}
+
+export type DivergenceResponse = DivergenceResult | DivergenceInsufficientData | DivergenceNoDivergence;

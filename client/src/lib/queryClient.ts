@@ -5,6 +5,10 @@ import { QueryClient, QueryFunction } from "@tanstack/react-query";
 const API_BASE = "";
 
 async function throwIfResNotOk(res: Response) {
+  // 304 Not Modified has no body, handle gracefully
+  if (res.status === 304) {
+    return;
+  }
   if (!res.ok) {
     const text = (await res.text()) || res.statusText;
     throw new Error(`${res.status}: ${text}`);
@@ -23,6 +27,13 @@ export async function apiRequest(
 
   if (data && method !== "GET") {
     options.body = JSON.stringify(data);
+  }
+
+  // Add cache-busting for GET requests to prevent 304
+  if (method === "GET" && url.includes("?")) {
+    url += `&_t=${Date.now()}`;
+  } else if (method === "GET") {
+    url += `?_t=${Date.now()}`;
   }
 
   const res = await fetch(`${API_BASE}${url}`, options);
