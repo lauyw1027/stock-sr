@@ -1,7 +1,7 @@
 import type { Express, Request, Response } from "express";
 import { createServer } from "node:http";
 import type { Server } from "node:http";
-import YahooFinancePkg from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
 import {
   computeIndicators,
   buildZones,
@@ -13,11 +13,8 @@ import { scanAthAtl, getCachedData, scan52wAthAtl } from "./stocks";
 import { analyzeDivergence, fetchCandles, type Timeframe, type DivergenceResult, type InsufficientDataError, type ScanResult } from "./divergence";
 import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./divergence-scan";
 
-// yahoo-finance2 v3 需要實例化；suppressNotices 關閉調查/環境通知
-const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
-const yahooFinance = new YahooFinance({
-  suppressNotices: ["yahooSurvey", "ripHistorical"],
-});
+// yahoo-finance2 v3+ requires instantiation with new
+const yahooFinance = new YahooFinance();
 
 /** 常見交易所後綴，供模糊代號提示 */
 const SUFFIX_HINTS = [

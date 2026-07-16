@@ -12,12 +12,10 @@
  *      取最近3天histogram平均值，避免單日噪音造成漏判
  */
 
-import YahooFinancePkg from "yahoo-finance2";
+import YahooFinance from "yahoo-finance2";
 
-const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
-const yahooFinance = new YahooFinance({
-  suppressNotices: ["yahooSurvey", "ripHistorical"],
-});
+// yahoo-finance2 v3+ requires instantiation with new
+const yahooFinance = new YahooFinance();
 
 export interface Candle {
   date: string;
@@ -590,6 +588,10 @@ export function analyzeDivergence(
 
 export async function fetchCandles(symbol: string, timeframe: Timeframe): Promise<Candle[]> {
   const now = new Date();
+  // 使用昨天的日期，避免獲取到未完成的當日數據
+  const yesterday = new Date(now);
+  yesterday.setDate(yesterday.getDate() - 1);
+  
   let start: Date;
   let interval: "1d" | "1wk" | "30m" | "60m";
 
@@ -600,7 +602,7 @@ export async function fetchCandles(symbol: string, timeframe: Timeframe): Promis
     case "1wk": start = new Date(now.getTime() - 365 * 24 * 60 * 60 * 1000 * 5); interval = "1wk"; break;
   }
 
-  const chart = await yahooFinance.chart(symbol, { period1: start, period2: now, interval });
+  const chart = await yahooFinance.chart(symbol, { period1: start, period2: yesterday, interval });
   const quotes = chart?.quotes ?? [];
 
   return quotes

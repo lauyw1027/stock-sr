@@ -206,9 +206,9 @@ export default function ATHATLPage() {
       <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
         {/* 控制區 */}
         <Card className="p-4">
-          <div className="flex flex-wrap gap-3 items-center justify-between">
+          <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-start sm:items-center justify-between">
             {/* Tab 切換 */}
-            <div className="flex gap-2">
+            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
               <Button
                 variant={activeTab === "ath" ? "default" : "outline"}
                 onClick={() => setActiveTab("ath")}

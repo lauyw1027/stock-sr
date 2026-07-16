@@ -8,6 +8,14 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
 });
 
+// Helper function to format date as YYYY-MM-DD in local timezone (避免 toISOString UTC 轉換問題)
+function formatDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
 export type Exchange = "NYSE" | "NASDAQ" | "AMEX";
 
 export interface StockInfo {
@@ -408,15 +416,18 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
 async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
   try {
     // 獲取過去 5 年數據足夠計算 ATH/ATL (更快)
+    // Use today's date to get the latest available data from Yahoo Finance
     const endDate = new Date();
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 5);
 
-    const hist = await yahooFinance.historical(stock.symbol, {
-      period1: startDate.toISOString().split("T")[0],
-      period2: endDate.toISOString().split("T")[0],
+    // 使用 .chart() 避免 historical() 的 null 值嚴格檢查
+    const chart = await yahooFinance.chart(stock.symbol, {
+      period1: startDate,
+      period2: endDate,
       interval: "1d",
     });
+    const hist = chart?.quotes ?? [];
 
     if (!hist || hist.length < 10) {
       return null;
@@ -583,22 +594,25 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
 async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null> {
   try {
     // 獲取過去2年的數據以確保涵蓋52週
+    // Use today's date to get the latest available data from Yahoo Finance
     const endDate = new Date();
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
 
-    const hist = await yahooFinance.historical(stock.symbol, {
-      period1: startDate.toISOString().split("T")[0],
-      period2: endDate.toISOString().split("T")[0],
+    // 使用 .chart() 避免 historical() 的 null 值嚴格檢查
+    const chart = await yahooFinance.chart(stock.symbol, {
+      period1: startDate,
+      period2: endDate,
       interval: "1d",
     });
+    const hist = chart?.quotes ?? [];
 
     if (!hist || hist.length < 50) {
       return null;
     }
 
     // 依日期排序
-    hist.sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+    hist.sort((a, b) => new Date(a.date!).getTime() - new Date(b.date!).getTime());
 
     // 取得過去52週（約252個交易日）的數據
     const last252Days = hist.slice(-252);
