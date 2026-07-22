@@ -21,7 +21,60 @@ import {
   ArrowUpDown,
   Volume2,
   Calendar,
+  Clock,
 } from "lucide-react";
+
+// Dynamic import for nyse-holidays (client-side)
+async function getNYSEHolidays(year: number): Promise<Set<string>> {
+  try {
+    const module = await import("nyse-holidays");
+    const holidays = module.nyseHolidays(year);
+    return new Set(holidays.map((h: { date: string }) => h.date));
+  } catch (e) {
+    console.error("[ATH-ATL] Failed to load nyse-holidays:", e);
+    return new Set();
+  }
+}
+
+// 檢查是否為美股假日
+async function isUSHoliday(date: Date): Promise<boolean> {
+  const year = date.getFullYear();
+  const holidays = await getNYSEHolidays(year);
+  const dateStr = date.toISOString().split("T")[0];
+  return holidays.has(dateStr);
+}
+
+// 檢查是否在美股交易時間內 (美東時間 9:30 AM - 4:00 PM，週一至週五，且非假日)
+async function isInUSMarketHours(): Promise<boolean> {
+  const now = new Date();
+  
+  // 轉換為美東時間
+  const etDate = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = etDate.getDay();
+  const hours = etDate.getHours();
+  const minutes = etDate.getMinutes();
+  const currentTimeMinutes = hours * 60 + minutes;
+  
+  // 市場開放時間: 9:30 AM - 4:00 PM ET (570 - 960 分鐘)
+  const marketOpen = 9 * 60 + 30; // 9:30
+  const marketClose = 16 * 60; // 16:00 (4:00 PM)
+  
+  // 檢查是否為平日 (週一=1, 週五=5)
+  const isWeekday = day >= 1 && day <= 5;
+  const isMarketHours = currentTimeMinutes >= marketOpen && currentTimeMinutes < marketClose;
+  const isHoliday = await isUSHoliday(etDate);
+  
+  return isWeekday && isMarketHours && !isHoliday;
+}
+
+// 檢查今天是否為交易日 (平日 + 非假日)
+async function isTradeDay(): Promise<boolean> {
+  const now = new Date();
+  const etDate = new Date(now.toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const day = etDate.getDay();
+  const isHoliday = await isUSHoliday(etDate);
+  return day >= 1 && day <= 5 && !isHoliday; // 週一至週五且非假日
+}
 
 interface ATHATLRecord {
   symbol: string;
@@ -64,9 +117,31 @@ export default function ATHATLPage() {
   };
   
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
+  const [sortField, setSortField] = useState<SortField>("ath_date");
   
-  // 根據 activeTab 決定排序欄位
-  const sortField: SortField = activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date";
+  // 根據 activeTab 初始排序欄位
+  useEffect(() => {
+    if (activeTab === "ath" || activeTab === "52w_ath") {
+      setSortField("ath_date");
+    } else {
+      setSortField("atl_date");
+    }
+  }, [activeTab]);
+
+  // 交易時間狀態
+  const [isMarketHours, setIsMarketHours] = useState(false);
+  const [isTodayTradeDay, setIsTodayTradeDay] = useState(false);
+
+  // 檢查市場狀態 (只執行一次)
+  useEffect(() => {
+    (async () => {
+      const marketOpen = await isInUSMarketHours();
+      const tradeDay = await isTradeDay();
+      setIsMarketHours(marketOpen);
+      setIsTodayTradeDay(tradeDay);
+      console.log(`[ATH-ATL] Market status: isTradeDay=${tradeDay}, isInMarketHours=${marketOpen}`);
+    })();
+  }, []);
 
   const mutation = useMutation({
     mutationFn: async () => {
@@ -287,17 +362,25 @@ export default function ATHATLPage() {
               <Volume2 className="w-3 h-3 mr-1" />
               成交量 {sortField === "volume" && (sortOrder === "desc" ? "↓" : "↑")}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => handleSort(activeTab === "ath" ? "ath_date" : "atl_date")}>
+            <Button variant="ghost" size="sm" onClick={() => handleSort(activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date")}>
               <Calendar className="w-3 h-3 mr-1" />
-              日期 {sortField === (activeTab === "ath" ? "ath_date" : "atl_date") && (sortOrder === "desc" ? "↓" : "↑")}
+              日期 {sortField === (activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date") && (sortOrder === "desc" ? "↓" : "↑")}
             </Button>
           </div>
 
           {/* 資料更新時間 */}
           {data?.lastUpdated && (
-            <p className="text-xs text-muted-foreground mt-3">
-              資料更新時間：{new Date(data.lastUpdated).toLocaleString("zh-TW")}
-            </p>
+            <div className="flex items-center gap-2 mt-3">
+              {isMarketHours && isTodayTradeDay && (
+                <Badge variant="outline" className="bg-amber-500/20 text-amber-500 border-amber-500/40">
+                  <Clock className="w-3 h-3 mr-1" />
+                  盤中即時
+                </Badge>
+              )}
+              <p className="text-xs text-muted-foreground">
+                資料更新時間：{new Date(data.lastUpdated).toLocaleString("zh-TW")}
+              </p>
+            </div>
           )}
         </Card>
 
