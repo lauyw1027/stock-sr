@@ -12,7 +12,7 @@
       "src": "api/index.js",
       "use": "@vercel/node",
       "config": {
-        "includeFiles": ["dist/client/**", "dist/index.cjs"],
+        "includeFiles": ["dist/client/**", "dist/index.cjs", "data/**"],
         "maxDuration": 60
       }
     }
@@ -20,5 +20,11 @@
   "routes": [
     { "src": "/api/(.*)", "dest": "api/index.js" },
     { "handle": "filesystem" }
+  ],
+  "crons": [
+    {
+      "path": "/api/credit-monitor/trigger",
+      "schedule": "0 6 * * *"
+    }
   ]
 }

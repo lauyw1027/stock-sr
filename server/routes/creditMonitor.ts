@@ -42,7 +42,9 @@ export function registerCreditMonitorRoutes(
   
   // POST /api/credit-monitor/trigger - 手動觸發更新（用於測試或管理）
   // 必須放在 /credit-monitor 之前，避免被錯誤匹配
-  app.post('/api/credit-monitor/trigger', async (req: Request, res: Response) => {
+  // GET handler: Vercel cron jobs always send GET requests
+  // POST handler: manual admin use (supports Authorization header)
+  async function handleTrigger(req: Request, res: Response) {
     try {
       // 可以加入簡單的認證（例如檢查 secret 參數）
       const secret = req.headers.authorization?.replace('Bearer ', '');
@@ -52,7 +54,7 @@ export function registerCreditMonitorRoutes(
         return res.status(401).json({ error: 'Unauthorized' });
       }
       
-      console.log('[CreditMonitor] Manual trigger received');
+      console.log('[CreditMonitor] Trigger received');
       const record = await triggerManualUpdate();
       
       if (record) {
@@ -73,7 +75,12 @@ export function registerCreditMonitorRoutes(
         message: error instanceof Error ? error.message : 'Unknown error',
       });
     }
-  });
+  }
+
+  // Vercel cron sends GET; manual admin can use POST
+  app.get('/api/credit-monitor/trigger', handleTrigger);
+  app.post('/api/credit-monitor/trigger', handleTrigger);
+
   
   // GET /api/credit-monitor - 回傳完整 JSON
   app.get('/api/credit-monitor', (_req: Request, res: Response) => {

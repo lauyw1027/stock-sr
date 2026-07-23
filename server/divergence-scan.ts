@@ -15,7 +15,9 @@ import { getUSStocks, type StockInfo } from "./stocks";
 const __filename = __filename || "";
 const __dirname = path.dirname(__filename);
 
-const CACHE_DIR = path.resolve(__dirname, "../../data");
+// Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
+// 本地開發則使用專案根目錄下的 data/ 資料夾
+const CACHE_DIR = process.env.VERCEL ? '/tmp' : path.resolve(process.cwd(), 'data');
 const CACHE_FILE_1D = path.join(CACHE_DIR, "divergence-1d.json");
 const CACHE_FILE_1WK = path.join(CACHE_DIR, "divergence-1wk.json");
 

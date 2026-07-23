@@ -37,8 +37,10 @@ const yahooFinance = new YahooFinance({
   suppressNotices: ['yahooSurvey', 'ripHistorical'],
 });
 
-// 資料檔案路徑 - 使用 process.cwd() 確保在不同環境都能正確找到
-const DATA_FILE = path.join(process.cwd(), 'data', 'credit_monitor.json');
+// 資料檔案路徑 - Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
+// 本地開發則使用專案根目錄下的 data/ 資料夾
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.join(process.cwd(), 'data');
+const DATA_FILE = path.join(DATA_DIR, 'credit_monitor.json');
 
 // ============================================================================
 // 工具函式
@@ -319,6 +321,15 @@ function loadExistingData(): CreditMonitorData {
     if (fs.existsSync(DATA_FILE)) {
       const content = fs.readFileSync(DATA_FILE, 'utf-8');
       return JSON.parse(content) as CreditMonitorData;
+    }
+    // 在 Vercel 上，/tmp 在冷啟動後為空白。嘗試讀取專案內建的種子資料
+    if (process.env.VERCEL) {
+      const seedFile = path.join(process.cwd(), 'data', 'credit_monitor.json');
+      if (fs.existsSync(seedFile)) {
+        const content = fs.readFileSync(seedFile, 'utf-8');
+        console.log('[CreditMonitor] Loaded seed data from bundled file');
+        return JSON.parse(content) as CreditMonitorData;
+      }
     }
   } catch (error) {
     console.error('[CreditMonitor] Error loading existing data:', error);

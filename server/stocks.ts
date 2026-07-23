@@ -2,6 +2,10 @@ import YahooFinancePkg from "yahoo-finance2";
 import fs from "node:fs";
 import path from "node:path";
 
+// Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
+// 本地開發則使用專案根目錄下的 data/ 資料夾
+const DATA_DIR = process.env.VERCEL ? '/tmp' : path.resolve(process.cwd(), 'data');
+
 // Initialize YahooFinance (same as in routes.ts)
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
 const yahooFinance = new YahooFinance({
@@ -402,7 +406,7 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   console.log(`[ATH-ATL] Scan complete: ${results.ath.length} ATH, ${results.atl.length} ATL`);
 
   // 保存到檔案作為備份
-  const cachePath = path.resolve(__dirname, "../../data/ath-atl-cache.json");
+  const cachePath = path.join(DATA_DIR, "ath-atl-cache.json");
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     fs.writeFileSync(cachePath, JSON.stringify(results, null, 2));
@@ -580,7 +584,7 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
   console.log(`[52W] Scan complete: ${results.ath52w.length} 52W ATH, ${results.atl52w.length} 52W ATL`);
 
   // Save to file cache
-  const cachePath = path.resolve(__dirname, "../../data/52w-cache.json");
+  const cachePath = path.join(DATA_DIR, "52w-cache.json");
   try {
     fs.mkdirSync(path.dirname(cachePath), { recursive: true });
     fs.writeFileSync(cachePath, JSON.stringify({ ...results, cachedAt: cached52wDataTime }, null, 2));
