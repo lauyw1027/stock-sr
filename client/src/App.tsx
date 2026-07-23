@@ -10,6 +10,7 @@ import Home from "@/pages/home";
 import About from "@/pages/about";
 import ATHATL from "@/pages/ath-atl";
 import Divergence from "@/pages/divergence";
+import CreditMonitorPage from "@/pages/CreditMonitorPage";
 
 function AppRouter() {
   return (
@@ -18,6 +19,7 @@ function AppRouter() {
       <Route path="/about" component={About} />
       <Route path="/ath-atl" component={ATHATL} />
       <Route path="/divergence" component={Divergence} />
+      <Route path="/credit-monitor" component={CreditMonitorPage} />
       <Route component={NotFound} />
     </Switch>
   );

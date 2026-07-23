@@ -1,0 +1,62 @@
+{
+  "lastUpdated": "2026-07-23T05:57:35.341Z",
+  "quarters": [
+    "2026Q3"
+  ],
+  "latestQuarter": "2026Q3",
+  "data": [
+    {
+      "日期": "2026-07-23",
+      "季度": "2026Q3",
+      "sectorScores": {
+        "creditMarket": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "liquidityStress": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "aiInfraCore": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "chipSupplyChain": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "privateCreditFunding": {
+          "score": 0,
+          "signal": "綠燈"
+        }
+      },
+      "weightedTotal": 0,
+      "finalSignal": "綠燈",
+      "triggeredRules": [],
+      "rawInputs": {
+        "hyOasDelta": 0,
+        "igOasDelta": 0,
+        "hygChange": -0.16,
+        "jnkChange": -0.16,
+        "lqdChange": -0.17,
+        "bklnChange": -0.05,
+        "ofrFsi": -0.7011,
+        "vix": 16.64,
+        "dxyChange": -0.16,
+        "crwvChange": 3.85,
+        "nbisChange": 0.57,
+        "orclChange": -0.95,
+        "vrtChange": -1.1,
+        "dlrChange": -0.5,
+        "eqixChange": 0.08,
+        "nvdaChange": 2.3,
+        "amdChange": 1.45,
+        "avgoChange": 2.67,
+        "tsmChange": -0.8,
+        "arccChange": -0.47,
+        "bxslChange": -0.77,
+        "obdcChange": -1.1
+      }
+    }
+  ]
+}

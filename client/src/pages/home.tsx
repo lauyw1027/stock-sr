@@ -140,6 +140,11 @@ export default function Home() {
               背離掃描
             </a>
           </Link>
+          <Link href="/credit-monitor">
+            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              信用風險監控
+            </a>
+          </Link>
         </div>
       </header>
 
