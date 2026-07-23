@@ -10,6 +10,7 @@ import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Badge } from '@/components/ui/badge';
 import { AlertTriangle, TrendingUp, TrendingDown, Activity, DollarSign, Cpu, Layers, Wallet } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { Layout } from '@/components/Layout';
 
 // ============================================================================
 // 燈號顏色配置
@@ -247,145 +248,151 @@ export default function CreditMonitorPage() {
 
   if (loading) {
     return (
-      <div className="container mx-auto py-8">
-        <div className="flex items-center justify-center h-64">
-          <div className="text-muted-foreground">加载中...</div>
+      <Layout title="AI 基建信用風險監控" subtitle="系統性風險早期預警框架">
+        <div className="container mx-auto py-8">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-muted-foreground">加载中...</div>
+          </div>
         </div>
-      </div>
+      </Layout>
     );
   }
 
   if (error) {
     return (
-      <div className="container mx-auto py-8">
-        <Card className="border-destructive">
-          <CardHeader>
-            <CardTitle className="text-destructive">错误</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <p className="text-destructive">{error.message}</p>
-            <button
-              onClick={refetch}
-              className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md"
-            >
-              重试
-            </button>
-          </CardContent>
-        </Card>
-      </div>
+      <Layout title="AI 基建信用風險監控" subtitle="系統性風險早期預警框架">
+        <div className="container mx-auto py-8">
+          <Card className="border-destructive">
+            <CardHeader>
+              <CardTitle className="text-destructive">错误</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <p className="text-destructive">{error.message}</p>
+              <button
+                onClick={refetch}
+                className="mt-4 px-4 py-2 bg-primary text-primary-foreground rounded-md"
+              >
+                重试
+              </button>
+            </CardContent>
+          </Card>
+        </div>
+      </Layout>
     );
   }
 
   return (
-    <div className="container mx-auto py-8 space-y-6">
-      {/* 頁面標題 */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">AI 基建系統性信用風險監控</h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            模擬系統性風險早期預警框架（跨信用市場、流動性、產業鏈多板塊交叉驗證）
-          </p>
-        </div>
-        {lastUpdated && (
-          <div className="text-xs text-muted-foreground">
-            最后更新：{new Date(lastUpdated).toLocaleString('zh-TW')}
+    <Layout title="AI 基建信用風險監控" subtitle="系統性風險早期預警框架">
+      <div className="mx-auto max-w-6xl px-4 py-8 space-y-6">
+        {/* 頁面標題 */}
+        <div className="flex items-center justify-between">
+          <div>
+            <h1 className="text-2xl font-bold">AI 基建系統性信用風險監控</h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              模擬系統性風險早期預警框架（跨信用市場、流動性、產業鏈多板塊交叉驗證）
+            </p>
           </div>
-        )}
-      </div>
+          {lastUpdated && (
+            <div className="text-xs text-muted-foreground">
+              最后更新：{new Date(lastUpdated).toLocaleString('zh-TW')}
+            </div>
+          )}
+        </div>
 
-      {/* 今日風險狀態 */}
-      {latest && (
-        <Card className="overflow-hidden">
-          <div
-            className="p-6"
-            style={{ backgroundColor: SIGNAL_BG_COLORS[latest.finalSignal] }}
-          >
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-sm text-muted-foreground">今日風險狀態</div>
-                <div className="flex items-center gap-3 mt-2">
-                  <SignalIndicator signal={latest.finalSignal} size="lg" />
-                  <span
-                    className="text-3xl font-bold"
+        {/* 今日風險狀態 */}
+        {latest && (
+          <Card className="overflow-hidden">
+            <div
+              className="p-6"
+              style={{ backgroundColor: SIGNAL_BG_COLORS[latest.finalSignal] }}
+            >
+              <div className="flex items-center justify-between">
+                <div>
+                  <div className="text-sm text-muted-foreground">今日風險狀態</div>
+                  <div className="flex items-center gap-3 mt-2">
+                    <SignalIndicator signal={latest.finalSignal} size="lg" />
+                    <span
+                      className="text-3xl font-bold"
+                      style={{ color: SIGNAL_COLORS[latest.finalSignal] }}
+                    >
+                      {latest.finalSignal}
+                    </span>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-sm text-muted-foreground">加權總分</div>
+                  <div
+                    className="text-4xl font-bold"
                     style={{ color: SIGNAL_COLORS[latest.finalSignal] }}
                   >
-                    {latest.finalSignal}
-                  </span>
+                    {latest.weightedTotal}
+                  </div>
+                  <div className="text-xs text-muted-foreground mt-1">
+                    （滿分 100）
+                  </div>
                 </div>
               </div>
-              <div className="text-right">
-                <div className="text-sm text-muted-foreground">加權總分</div>
-                <div
-                  className="text-4xl font-bold"
-                  style={{ color: SIGNAL_COLORS[latest.finalSignal] }}
-                >
-                  {latest.weightedTotal}
+
+              {/* 觸發的規則 */}
+              {latest.triggeredRules.length > 0 && (
+                <div className="mt-4 pt-4 border-t border-border/30">
+                  <div className="flex items-center gap-2 text-sm font-medium mb-2">
+                    <AlertTriangle className="h-4 w-4" />
+                    觸發的規則
+                  </div>
+                  <ul className="space-y-1">
+                    {latest.triggeredRules.map((rule, idx) => (
+                      <li key={idx} className="text-sm text-muted-foreground">
+                        • {rule}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <div className="text-xs text-muted-foreground mt-1">
-                  （滿分 100）
-                </div>
-              </div>
+              )}
             </div>
+          </Card>
+        )}
 
-            {/* 觸發的規則 */}
-            {latest.triggeredRules.length > 0 && (
-              <div className="mt-4 pt-4 border-t border-border/30">
-                <div className="flex items-center gap-2 text-sm font-medium mb-2">
-                  <AlertTriangle className="h-4 w-4" />
-                  觸發的規則
-                </div>
-                <ul className="space-y-1">
-                  {latest.triggeredRules.map((rule, idx) => (
-                    <li key={idx} className="text-sm text-muted-foreground">
-                      • {rule}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            )}
-          </div>
-        </Card>
-      )}
-
-      {/* 五個板塊分數卡片 */}
-      {latest && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {SECTOR_INFOS.map((info) => (
-            <SectorScoreCard
-              key={info.key}
-              sector={latest.sectorScores[info.key]}
-              info={info}
-            />
-          ))}
-        </div>
-      )}
-
-      {/* 季度切換 */}
-      {quarters.length > 0 && (
-        <Tabs
-          value={activeQuarter}
-          onValueChange={setActiveQuarter}
-          className="w-full"
-        >
-          <TabsList className="mb-4">
-            {quarters.map((quarter) => (
-              <TabsTrigger key={quarter} value={quarter}>
-                {quarter}
-              </TabsTrigger>
+        {/* 五個板塊分數卡片 */}
+        {latest && (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
+            {SECTOR_INFOS.map((info) => (
+              <SectorScoreCard
+                key={info.key}
+                sector={latest.sectorScores[info.key]}
+                info={info}
+              />
             ))}
-          </TabsList>
-        </Tabs>
-      )}
+          </div>
+        )}
 
-      {/* 歷史資料表格 */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">歷史資料</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <DataTable data={filteredData} />
-        </CardContent>
-      </Card>
-    </div>
+        {/* 季度切換 */}
+        {quarters.length > 0 && (
+          <Tabs
+            value={activeQuarter}
+            onValueChange={setActiveQuarter}
+            className="w-full"
+          >
+            <TabsList className="mb-4">
+              {quarters.map((quarter) => (
+                <TabsTrigger key={quarter} value={quarter}>
+                  {quarter}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+
+        {/* 歷史資料表格 */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-lg">歷史資料</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <DataTable data={filteredData} />
+          </CardContent>
+        </Card>
+      </div>
+    </Layout>
   );
 }

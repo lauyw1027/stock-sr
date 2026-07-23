@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { Layout } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -257,27 +258,7 @@ export default function ATHATLPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center gap-3">
-          <Logo />
-          <div className="flex-1">
-            <h1 className="text-lg font-semibold tracking-tight">
-              ATH/ATL Scanner
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              歷史新高/新低 | All-Time High & Low
-            </p>
-          </div>
-          <Link href="/">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              首頁
-            </a>
-          </Link>
-        </div>
-      </header>
-
+    <Layout title="ATH / ATL Scanner" subtitle="歷史新高/新低 | All-Time High & Low">
       <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
         {/* 控制區 */}
         <Card className="p-4">
@@ -484,36 +465,6 @@ export default function ATHATLPage() {
           </>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border mt-10">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-muted-foreground text-center">
-          <p>
-            © {new Date().getFullYear()} Stocksr — 支撐阻力技術分析工具
-          </p>
-        </div>
-      </footer>
-    </div>
+    </Layout>
   );
 }
-
-function Logo({ className = "", size = 28 }: { className?: string; size?: number }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 32 32"
-      fill="none"
-      className={className}
-      aria-label="Stocksr 標誌"
-    >
-      <rect x="1" y="1" width="30" height="30" rx="7" stroke="currentColor" className="text-primary" strokeWidth="1.5" />
-      <path d="M6 20 L12 14 L17 18 L26 8" stroke="currentColor" className="text-primary" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-      <line x1="6" y1="24" x2="26" y2="24" stroke="currentColor" className="text-primary/40" strokeWidth="1.5" strokeDasharray="2 2" />
-      <line x1="6" y1="11" x2="26" y2="11" stroke="currentColor" className="text-destructive/50" strokeWidth="1.5" strokeDasharray="2 2" />
-    </svg>
-  );
-}
-
-// Need to import Link from wouter
-import { Link } from "wouter";

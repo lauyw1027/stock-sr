@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { Layout } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -161,32 +162,7 @@ export default function DivergencePage() {
   );
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center gap-3">
-          <Logo />
-          <div className="flex-1">
-            <h1 className="text-lg font-semibold tracking-tight">
-              背離掃描
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Divergence Scanner | MACD/RSI/Volume/OBV/MFI
-            </p>
-          </div>
-          <Link href="/">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              首頁
-            </a>
-          </Link>
-          <Link href="/ath-atl">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              ATH/ATL
-            </a>
-          </Link>
-        </div>
-      </header>
-
+    <Layout title="背離描描" subtitle="Divergence Scanner | MACD/RSI/Volume/OBV/MFI">
       <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
         {/* 時間週期切換 */}
         <Card className="p-4">
@@ -449,15 +425,7 @@ export default function DivergencePage() {
           </Card>
         )}
       </main>
-
-      {/* Footer */}
-      <footer className="border-t border-border mt-10">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-muted-foreground text-center">
-          <p>© {new Date().getFullYear()} Stocksr — 背離技術分析工具</p>
-          <p className="mt-1">本工具僅為技術分析與教育用途，非投資建議。</p>
-        </div>
-      </footer>
-    </div>
+    </Layout>
   );
 }
 
