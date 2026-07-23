@@ -14,7 +14,7 @@ import { analyzeDivergence, fetchCandles, type Timeframe, type DivergenceResult,
 import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./divergence-scan";
 import { registerCreditMonitorRoutes } from "./routes/creditMonitor";
 
-// yahoo-finance2 v3+ requires instantiation with new
+// yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
 
 /** 常見交易所後綴，供模糊代號提示 */
