@@ -5,10 +5,15 @@ import viteConfig from "../vite.config";
 import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
-import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Vite.ts only runs in development, not bundled for production
+// But keep this safe anyway
+let __dirname = path.dirname("");
+try {
+  if (typeof import.meta !== 'undefined' && import.meta.url) {
+    __dirname = path.dirname(new URL(import.meta.url).pathname);
+  }
+} catch (e) { /* ignore */ }
 const viteLogger = createLogger();
 
 export async function setupVite(server: Server, app: Express) {

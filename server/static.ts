@@ -2,14 +2,16 @@ import express from 'express';
 import type { Express } from 'express';
 import fs from "node:fs";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// Use process.cwd() for Vercel - more reliable than __dirname in bundled code
+function getDistPath() {
+  // In production Vercel, process.cwd() is /var/task
+  return path.resolve(process.cwd(), "dist/client");
+}
 
 export function serveStatic(app: Express) {
   // Vite builds to dist/client, not dist/public
-  const distPath = path.resolve(__dirname, "client");
+  const distPath = getDistPath();
   if (!fs.existsSync(distPath)) {
     throw new Error(
       `Could not find the build directory: ${distPath}, make sure to build the client first`,
