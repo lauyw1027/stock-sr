@@ -5,7 +5,9 @@ import viteConfig from "../vite.config";
 import fs from "node:fs";
 import path from "node:path";
 import { nanoid } from "nanoid";
+import { fileURLToPath } from "node:url";
 
+const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const viteLogger = createLogger();
 

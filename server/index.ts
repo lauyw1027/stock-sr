@@ -64,16 +64,18 @@ app.use((req, res, next) => {
 (async () => {
   await registerRoutes(httpServer, app);
 
-  // Pre-warm ATH/ATL cache on server startup
+  // Pre-warm stock list and ATH/ATL cache on server startup
   setTimeout(async () => {
-    console.log("[Startup] Pre-warming ATH/ATL cache...");
+    console.log("[Startup] Initializing stock list...");
     try {
-      const { scanAthAtl, scan52wAthAtl } = await import("./stocks");
+      const { initializeStockList, scanAthAtl, scan52wAthAtl } = await import("./stocks");
+      await initializeStockList();
+      console.log("[Startup] Pre-warming ATH/ATL cache...");
       await scanAthAtl(false);
       await scan52wAthAtl(false);
       console.log("[Startup] Cache pre-warming complete");
     } catch (e) {
-      console.error("[Startup] Cache pre-warming failed:", e);
+      console.error("[Startup] Initialization failed:", e);
     }
   }, 2000);
 

@@ -12,8 +12,7 @@ import {
 } from "./divergence";
 import { getUSStocks, type StockInfo } from "./stocks";
 
-const __filename = __filename || "";
-const __dirname = path.dirname(__filename);
+// Note: __filename and __dirname not needed in this module
 
 // Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
 // 本地開發則使用專案根目錄下的 data/ 資料夾

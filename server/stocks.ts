@@ -1,6 +1,8 @@
 import YahooFinancePkg from "yahoo-finance2";
 import fs from "node:fs";
 import path from "node:path";
+import axios from "axios";
+import * as cheerio from "cheerio";
 
 // Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
 // 本地開發則使用專案根目錄下的 data/ 資料夾
@@ -42,6 +44,233 @@ export interface ATHATLRecord {
   volume: number;
   list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
 }
+
+// ============ Stock List Fetching Functions ============
+
+interface SECCompanyTicker {
+  cik_str: number;
+  ticker: string;
+  title: string;
+}
+
+interface SECResponse {
+  count?: number;
+  [key: string]: SECCompanyTicker | number | undefined;
+}
+
+/**
+ * Fetch S&P 500 companies from Wikipedia
+ */
+async function fetchSP500FromWikipedia(): Promise<StockInfo[]> {
+  const url = "https://en.wikipedia.org/wiki/List_of_S%26P_500_companies";
+  const res = await axios.get(url, {
+    headers: {
+      "User-Agent": "StockSR-App/1.0 (https://stocksr.online; contact@stocksr.online)",
+    },
+  });
+  
+  const $ = cheerio.load(res.data);
+  const stocks: StockInfo[] = [];
+  
+  $("#constituents tbody tr").each((_, row) => {
+    const cells = $(row).find("td");
+    if (cells.length < 2) return;
+    
+    const symbol = $(cells[0]).text().trim().replace(".", "-");
+    const name = $(cells[1]).text().trim();
+    const exchangeText = $(cells[2])?.text().trim().toUpperCase() || "NYSE";
+    
+    if (symbol && name) {
+      stocks.push({
+        symbol: symbol.toUpperCase(),
+        exchange: exchangeText.includes("NASDAQ") ? "NASDAQ" : exchangeText.includes("AMEX") ? "AMEX" : "NYSE",
+        companyName: name,
+      });
+    }
+  });
+  
+  if (stocks.length === 0) {
+    throw new Error("Wikipedia S&P 500 scrape returned no stocks");
+  }
+  
+  console.log(`[StockList] Loaded ${stocks.length} S&P 500 stocks from Wikipedia`);
+  return stocks;
+}
+
+/**
+ * Fetch NASDAQ-100 companies from Wikipedia
+ */
+async function fetchNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
+  const url = "https://en.wikipedia.org/wiki/NASDAQ-100";
+  const res = await axios.get(url, {
+    headers: {
+      "User-Agent": "StockSR-App/1.0 (https://stocksr.online; contact@stocksr.online)",
+    },
+  });
+  
+  const $ = cheerio.load(res.data);
+  const stocks: StockInfo[] = [];
+  
+  // NASDAQ-100 table structure varies, try multiple selectors
+  const rows = $(".wikitable tbody tr, . sortable tbody tr");
+  
+  $(rows).each((_, row) => {
+    const cells = $(row).find("td");
+    if (cells.length < 2) return;
+    
+    // First column is usually the ticker
+    const symbol = $(cells[0]).text().trim().replace(/\[.*?\]/g, "").replace(".", "-");
+    const name = $(cells[1])?.text().trim() || $(cells[0]).attr("title") || "";
+    
+    if (symbol && symbol.length <= 5 && /^[A-Z]+$/.test(symbol.replace(/-/g, ""))) {
+      stocks.push({
+        symbol: symbol.toUpperCase(),
+        exchange: "NASDAQ",
+        companyName: name || symbol,
+      });
+    }
+  });
+  
+  if (stocks.length === 0) {
+    // Try alternative: look for links with ticker-like text
+    $("a").each((_, el) => {
+      const text = $(el).text().trim().toUpperCase();
+      if (text.length >= 1 && text.length <= 5 && /^[A-Z]+$/.test(text)) {
+        if (!stocks.find(s => s.symbol === text)) {
+          stocks.push({
+            symbol: text,
+            exchange: "NASDAQ",
+            companyName: text,
+          });
+        }
+      }
+    });
+  }
+  
+  console.log(`[StockList] Loaded ${stocks.length} NASDAQ-100 stocks from Wikipedia`);
+  return stocks;
+}
+
+/**
+ * Combine S&P 500 + NASDAQ 100 and remove duplicates
+ */
+async function fetchSP500AndNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
+  const [sp500, nasdaq100] = await Promise.all([
+    fetchSP500FromWikipedia().catch(e => {
+      console.error("[StockList] S&P 500 fetch failed:", e);
+      return [] as StockInfo[];
+    }),
+    fetchNASDAQ100FromWikipedia().catch(e => {
+      console.error("[StockList] NASDAQ-100 fetch failed:", e);
+      return [] as StockInfo[];
+    }),
+  ]);
+  
+  // Combine and deduplicate by symbol
+  const combined = [...sp500, ...nasdaq100];
+  const seen = new Map<string, StockInfo>();
+  
+  for (const stock of combined) {
+    if (!seen.has(stock.symbol)) {
+      seen.set(stock.symbol, stock);
+    } else {
+      // Keep existing if it has better exchange info
+      const existing = seen.get(stock.symbol)!;
+      if (stock.exchange === "NASDAQ" && existing.exchange !== "NASDAQ") {
+        seen.set(stock.symbol, { ...stock, companyName: existing.companyName || stock.companyName });
+      }
+    }
+  }
+  
+  const result = Array.from(seen.values());
+  console.log(`[StockList] Combined ${result.length} unique stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length})`);
+  return result;
+}
+
+/**
+ * Fetch all US stock tickers from SEC.gov
+ * Returns company tickers without exchange info (all US listed)
+ */
+async function fetchAllTickersFromSEC(): Promise<StockInfo[]> {
+  const url = "https://www.sec.gov/files/company_tickers.json";
+  const res = await axios.get(url, {
+    headers: {
+      "User-Agent": "StockSR-App/1.0 (https://stocksr.online; contact@stocksr.online)",
+    },
+  });
+
+  const data = res.data as SECResponse;
+  if (!data || Object.keys(data).length === 0) {
+    throw new Error("SEC returned empty data");
+  }
+
+  const stocks: StockInfo[] = [];
+  for (const key of Object.keys(data)) {
+    if (key === "count") continue;
+    
+    const item = data[key] as SECCompanyTicker;
+    if (!item || !item.ticker) continue;
+    
+    const ticker = item.ticker?.trim().toUpperCase();
+    const name = item.title?.trim();
+    
+    // Filter: valid tickers are 1-5 letters, exclude special characters
+    if (ticker && name && ticker.length >= 1 && ticker.length <= 5 && /^[A-Z]+$/.test(ticker)) {
+      stocks.push({
+        symbol: ticker,
+        exchange: "NASDAQ", // Default, will be corrected during scan if needed
+        companyName: name,
+      });
+    }
+  }
+
+  if (stocks.length === 0) {
+    throw new Error("SEC scrape returned no stocks");
+  }
+
+  console.log(`[StockList] Loaded ${stocks.length} stocks from SEC.gov`);
+  return stocks;
+}
+
+/**
+ * Fetch US stock list from Wikipedia (S&P 500 + NASDAQ-100)
+ * Uses cached data if available
+ */
+export async function fetchUSStockList(): Promise<StockInfo[]> {
+  const cachePath = path.join(DATA_DIR, "sp500-nasdaq100-cache.json");
+  
+  // Try to load from cache first
+  try {
+    if (fs.existsSync(cachePath)) {
+      const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+      if (cached.stocks && cached.stocks.length > 0) {
+        console.log(`[StockList] Loaded ${cached.stocks.length} stocks from cache`);
+        return cached.stocks;
+      }
+    }
+  } catch (e) {
+    console.error("[StockList] Cache read failed:", e);
+  }
+  
+  // No cache, fetch fresh from Wikipedia
+  try {
+    const stocks = await fetchSP500AndNASDAQ100FromWikipedia();
+    
+    // Save to cache
+    try {
+      fs.writeFileSync(cachePath, JSON.stringify({ stocks, updated: new Date().toISOString() }));
+    } catch (e) {
+      console.error("[StockList] Cache write failed:", e);
+    }
+    
+    return stocks;
+  } catch (e) {
+    console.error("[StockList] Wikipedia fetch failed:", e);
+    return [];
+  }
+}
+
+// ============ End Stock List Fetching Functions ============
 
 // 52週新高/新低快取
 let cached52wData: { ath52w: ATHATLRecord[]; atl52w: ATHATLRecord[]; lastUpdated: string } | null = null;
@@ -315,6 +544,8 @@ let isScanning = false;
 let isScanning52w = false;
 
 export function getUSStocks(): StockInfo[] {
+  // If US_STOCKS has been populated from FMP/Wikipedia, use it
+  // Otherwise fall back to EXPANDED_STOCKS
   const stocks = US_STOCKS.length > 0 ? US_STOCKS : EXPANDED_STOCKS;
   // 去重
   const seen = new Set<string>();
@@ -323,6 +554,24 @@ export function getUSStocks(): StockInfo[] {
     seen.add(s.symbol);
     return true;
   });
+}
+
+/**
+ * Initialize stock list from FMP or Wikipedia on server startup
+ */
+export async function initializeStockList(): Promise<void> {
+  if (US_STOCKS.length > 0) {
+    console.log(`[StockList] Already initialized with ${US_STOCKS.length} stocks`);
+    return;
+  }
+
+  try {
+    const stocks = await fetchUSStockList();
+    US_STOCKS = stocks;
+    console.log(`[StockList] Initialized with ${stocks.length} stocks from FMP/Wikipedia`);
+  } catch (e) {
+    console.error("[StockList] Failed to fetch stock list, using fallback:", e);
+  }
 }
 
 // Track if initial cache warming is complete
@@ -365,8 +614,8 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   const stocksToScan = getUSStocks();
   console.log(`[ATH-ATL] Starting scan for ${stocksToScan.length} stocks...`);
 
-  // 批量處理，每批 25 個 (increased from 10)
-  const batchSize = 25;
+  // 批量處理，每批 50 個 (increased for speed)
+  const batchSize = 50;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[ATH-ATL] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
@@ -545,8 +794,8 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
   const stocksToScan = getUSStocks();
   console.log(`[52W] Starting scan for ${stocksToScan.length} stocks...`);
 
-  // 批量處理
-  const batchSize = 10;
+  // 批量處理，每批 50 個
+  const batchSize = 50;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[52W] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
