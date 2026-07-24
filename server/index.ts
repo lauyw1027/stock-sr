@@ -66,10 +66,14 @@ app.use((req, res, next) => {
 
   // Pre-warm stock list and ATH/ATL cache on server startup
   setTimeout(async () => {
-    console.log("[Startup] Initializing stock list...");
     try {
       const { initializeStockList, scanAthAtl, scan52wAthAtl } = await import("./stocks");
+      
+      // First: Initialize stock list (must complete BEFORE scanning)
+      console.log("[Startup] Initializing stock list...");
       await initializeStockList();
+      
+      // Second: Then scan ATH/ATL (now US_STOCKS is populated)
       console.log("[Startup] Pre-warming ATH/ATL cache...");
       await scanAthAtl(false);
       await scan52wAthAtl(false);
