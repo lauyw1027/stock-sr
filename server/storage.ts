@@ -28,5 +28,5 @@ export class DatabaseStorage implements IStorage {
     return db.insert(users).values(insertUser).returning().get();
   }
 }
-
-export const storage = new DatabaseStorage();
+//test
+export const storage = new DatabaseStorage(); 
