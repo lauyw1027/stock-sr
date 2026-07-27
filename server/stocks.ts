@@ -4,9 +4,15 @@ import path from "node:path";
 import axios from "axios";
 import * as cheerio from "cheerio";
 
-// Vercel 的 /var/task 是唯讀，只有 /tmp 可寫入
-// 本地開發則使用專案根目錄下的 data/ 資料夾
-const DATA_DIR = process.env.VERCEL ? '/tmp' : path.resolve(process.cwd(), 'data');
+// Prefer the deployed data directory when it exists, otherwise fall back to /tmp.
+// This keeps Vercel using the same cache files that ship with the deployment.
+const DATA_DIR = (() => {
+  const localDataDir = path.resolve(process.cwd(), "data");
+  if (fs.existsSync(localDataDir)) {
+    return localDataDir;
+  }
+  return "/tmp";
+})();
 
 // Initialize YahooFinance (same as in routes.ts)
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
@@ -567,10 +573,11 @@ export async function initializeStockList(): Promise<void> {
 
   try {
     const stocks = await fetchUSStockList();
-    US_STOCKS = stocks;
-    console.log(`[StockList] Initialized with ${stocks.length} stocks from FMP/Wikipedia`);
+    US_STOCKS = stocks.length > 0 ? stocks : EXPANDED_STOCKS;
+    console.log(`[StockList] Initialized with ${US_STOCKS.length} stocks from FMP/Wikipedia`);
   } catch (e) {
     console.error("[StockList] Failed to fetch stock list, using fallback:", e);
+    US_STOCKS = EXPANDED_STOCKS;
   }
 }
 
@@ -602,6 +609,10 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   if (isScanning && !cachedData) {
     console.log("[ATH-ATL] Scan already in progress, returning cached data");
     return cachedData || { ath: [], atl: [], lastUpdated: "" };
+  }
+
+  if (US_STOCKS.length === 0) {
+    await initializeStockList();
   }
 
   isScanning = true;
@@ -789,6 +800,10 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
     atl52w: [],
     lastUpdated: new Date().toISOString(),
   };
+
+  if (US_STOCKS.length === 0) {
+    await initializeStockList();
+  }
 
   isScanning52w = true;
   const stocksToScan = getUSStocks();
