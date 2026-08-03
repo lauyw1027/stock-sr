@@ -10,6 +10,7 @@ const NAV_LINKS = [
   { href: "/", label: "支撐阻力分析" },
   { href: "/ath-atl", label: "ATH / ATL" },
   { href: "/divergence", label: "背離掃描" },
+  { href: "/carry-risk", label: "市場風險" },
   { href: "/credit-monitor", label: "信用風險監控" },
   { href: "/about", label: "關於" },
 ];

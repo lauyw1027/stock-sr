@@ -13,6 +13,7 @@ import { scanAthAtl, getCachedData, scan52wAthAtl } from "./stocks";
 import { analyzeDivergence, fetchCandles, type Timeframe, type DivergenceResult, type InsufficientDataError, type ScanResult } from "./divergence";
 import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./divergence-scan";
 import { registerCreditMonitorRoutes } from "./routes/creditMonitor";
+import { registerCarryTradeRoutes } from "./routes/carryTrade";
 
 // yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
@@ -372,6 +373,9 @@ export async function registerRoutes(
 
   // 註冊 Credit Monitor 路由
   registerCreditMonitorRoutes(httpServer, app);
+
+  // 註冊 Carry Trade 路由
+  registerCarryTradeRoutes(httpServer, app);
 
   return httpServer;
 }

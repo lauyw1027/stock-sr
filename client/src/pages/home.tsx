@@ -145,6 +145,11 @@ export default function Home() {
               信用風險監控
             </a>
           </Link>
+          <Link href="/carry-risk">
+            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
+              市場風險
+            </a>
+          </Link>
         </div>
       </header>
 
