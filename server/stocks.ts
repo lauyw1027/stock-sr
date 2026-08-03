@@ -158,10 +158,53 @@ async function fetchNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
 }
 
 /**
- * Combine S&P 500 + NASDAQ 100 and remove duplicates
+ * Fetch Russell 1000 companies from Wikipedia
+ * Source: https://en.wikipedia.org/wiki/Russell_1000_Index
+ * Note: Russell 1000 is market-cap weighted, includes growth stocks without盈利門檻 (no GAAP profit requirement)
  */
-async function fetchSP500AndNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
-  const [sp500, nasdaq100] = await Promise.all([
+async function fetchRussell1000FromWikipedia(): Promise<StockInfo[]> {
+  const url = "https://en.wikipedia.org/wiki/Russell_1000_Index";
+  const res = await axios.get(url, {
+    headers: {
+      "User-Agent": "StockSR-App/1.0 (https://stocksr.online; contact@stocksr.online)",
+    },
+  });
+  
+  const $ = cheerio.load(res.data);
+  const stocks: StockInfo[] = [];
+  
+  // Russell 1000 table structure: Company | Symbol | GICS Sector | GICS Sub-Industry
+  // Symbol is in 2nd column (index 1)
+  $(".wikitable tbody tr").each((_, row) => {
+    const cells = $(row).find("td");
+    if (cells.length < 2) return;
+    
+    // First cell is company name, second is symbol
+    const companyName = $(cells[0]).text().trim();
+    const symbol = $(cells[1]).text().trim().replace(".", "-");
+    
+    if (symbol && companyName && symbol.length <= 5 && /^[A-Z]+$/.test(symbol.replace(/-/g, ""))) {
+      stocks.push({
+        symbol: symbol.toUpperCase(),
+        exchange: "NYSE", // Default, will be corrected if found in other sources
+        companyName: companyName,
+      });
+    }
+  });
+  
+  if (stocks.length === 0) {
+    throw new Error("Wikipedia Russell 1000 scrape returned no stocks");
+  }
+  
+  console.log(`[StockList] Loaded ${stocks.length} Russell 1000 stocks from Wikipedia`);
+  return stocks;
+}
+
+/**
+ * Combine S&P 500 + NASDAQ 100 + Russell 1000 and remove duplicates
+ */
+async function fetchCombinedStockListFromWikipedia(): Promise<StockInfo[]> {
+  const [sp500, nasdaq100, russell1000] = await Promise.all([
     fetchSP500FromWikipedia().catch(e => {
       console.error("[StockList] S&P 500 fetch failed:", e);
       return [] as StockInfo[];
@@ -170,10 +213,14 @@ async function fetchSP500AndNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
       console.error("[StockList] NASDAQ-100 fetch failed:", e);
       return [] as StockInfo[];
     }),
+    fetchRussell1000FromWikipedia().catch(e => {
+      console.error("[StockList] Russell 1000 fetch failed:", e);
+      return [] as StockInfo[];
+    }),
   ]);
   
   // Combine and deduplicate by symbol
-  const combined = [...sp500, ...nasdaq100];
+  const combined = [...sp500, ...nasdaq100, ...russell1000];
   const seen = new Map<string, StockInfo>();
   
   for (const stock of combined) {
@@ -182,14 +229,20 @@ async function fetchSP500AndNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
     } else {
       // Keep existing if it has better exchange info
       const existing = seen.get(stock.symbol)!;
-      if (stock.exchange === "NASDAQ" && existing.exchange !== "NASDAQ") {
+      // Prefer NYSE/NASDAQ over unknown, and prefer existing if same quality
+      if (stock.exchange !== "NYSE" && stock.exchange !== "NASDAQ") {
+        // Keep existing
+      } else if (existing.exchange !== "NYSE" && existing.exchange !== "NASDAQ") {
+        seen.set(stock.symbol, stock);
+      } else if (stock.exchange === "NASDAQ" && existing.exchange !== "NASDAQ") {
+        // Prefer NASDAQ if existing is not NASDAQ
         seen.set(stock.symbol, { ...stock, companyName: existing.companyName || stock.companyName });
       }
     }
   }
   
   const result = Array.from(seen.values());
-  console.log(`[StockList] Combined ${result.length} unique stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length})`);
+  console.log(`[StockList] Combined ${result.length} unique stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length}, Russell 1000: ${russell1000.length})`);
   return result;
 }
 
@@ -239,11 +292,11 @@ async function fetchAllTickersFromSEC(): Promise<StockInfo[]> {
 }
 
 /**
- * Fetch US stock list from Wikipedia (S&P 500 + NASDAQ-100)
+ * Fetch US stock list from Wikipedia (S&P 500 + NASDAQ-100 + Russell 1000)
  * Uses cached data if available
  */
 export async function fetchUSStockList(): Promise<StockInfo[]> {
-  const cachePath = path.join(DATA_DIR, "sp500-nasdaq100-cache.json");
+  const cachePath = path.join(DATA_DIR, "combined-index-cache.json");
   
   // Try to load from cache first
   try {
@@ -260,7 +313,7 @@ export async function fetchUSStockList(): Promise<StockInfo[]> {
   
   // No cache, fetch fresh from Wikipedia
   try {
-    const stocks = await fetchSP500AndNASDAQ100FromWikipedia();
+    const stocks = await fetchCombinedStockListFromWikipedia();
     
     // Save to cache
     try {
@@ -317,7 +370,7 @@ const EXPANDED_STOCKS: StockInfo[] = [
   { symbol: "CRWD", exchange: "NASDAQ", companyName: "CrowdStrike Holdings" },
   { symbol: "DDOG", exchange: "NASDAQ", companyName: "Datadog Inc." },
   { symbol: "NET", exchange: "NASDAQ", companyName: "Cloudflare Inc." },
-  { symbol: "SQ", exchange: "NASDAQ", companyName: "Block Inc." },
+  { symbol: "XYZ", exchange: "NYSE", companyName: "Block Inc." },
   { symbol: "SHOP", exchange: "NASDAQ", companyName: "Shopify Inc." },
   { symbol: "ROKU", exchange: "NASDAQ", companyName: "Roku Inc." },
   { symbol: "ZM", exchange: "NASDAQ", companyName: "Zoom Video Communications" },
@@ -388,7 +441,7 @@ const EXPANDED_STOCKS: StockInfo[] = [
   { symbol: "CRWD", exchange: "NASDAQ", companyName: "CrowdStrike Holdings" },
   { symbol: "DDOG", exchange: "NASDAQ", companyName: "Datadog Inc." },
   { symbol: "NET", exchange: "NASDAQ", companyName: "Cloudflare Inc." },
-  { symbol: "SQ", exchange: "NASDAQ", companyName: "Block Inc." },
+  { symbol: "XYZ", exchange: "NYSE", companyName: "Block Inc." },
   { symbol: "SHOP", exchange: "NASDAQ", companyName: "Shopify Inc." },
   { symbol: "ROKU", exchange: "NASDAQ", companyName: "Roku Inc." },
   { symbol: "ZM", exchange: "NASDAQ", companyName: "Zoom Video Communications" },
@@ -560,6 +613,52 @@ export function getUSStocks(): StockInfo[] {
     seen.add(s.symbol);
     return true;
   });
+}
+
+/**
+ * Audit stale tickers in EXPANDED_STOCKS
+ * Compares EXPANDED_STOCKS symbols against the live combined stock list
+ * to detect tickers that are no longer valid (e.g., ticker changes, delistings)
+ * 
+ * This can be run manually to identify tickers that need updating:
+ *   import { auditStaleTickers } from './stocks';
+ *   auditStaleTickers().then(console.log);
+ */
+export async function auditStaleTickers(): Promise<{ stale: StockInfo[]; valid: StockInfo[] }> {
+  let liveStocks: StockInfo[] = [];
+  
+  try {
+    liveStocks = await fetchCombinedStockListFromWikipedia();
+  } catch (e) {
+    console.error("[Audit] Failed to fetch live stock list:", e);
+    // Fallback: try cached data
+    const cachePath = path.join(DATA_DIR, "combined-index-cache.json");
+    if (fs.existsSync(cachePath)) {
+      try {
+        const cached = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+        liveStocks = cached.stocks || [];
+        console.log("[Audit] Using cached data for audit");
+      } catch (e2) {
+        console.error("[Audit] Failed to read cache:", e2);
+      }
+    }
+  }
+  
+  const liveSymbols = new Set(liveStocks.map(s => s.symbol));
+  const stale: StockInfo[] = [];
+  const valid: StockInfo[] = [];
+  
+  for (const stock of EXPANDED_STOCKS) {
+    if (liveSymbols.has(stock.symbol)) {
+      valid.push(stock);
+    } else {
+      stale.push(stock);
+      console.warn(`[Audit] Stale ticker: ${stock.symbol} (${stock.companyName}) - not found in live data`);
+    }
+  }
+  
+  console.log(`[Audit] Complete: ${valid.length} valid, ${stale.length} stale tickers`);
+  return { stale, valid };
 }
 
 /**
