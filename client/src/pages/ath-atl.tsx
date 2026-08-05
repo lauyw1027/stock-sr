@@ -150,25 +150,37 @@ export default function ATHATLPage() {
     mutationFn: async () => {
       const params = new URLSearchParams();
       if (exchange !== "all") params.set("exchange", exchange);
+      // 只請求當前 tab 需要的資料類型
+      const typeMap: Record<TabType, string> = {
+        "ath": "ath",
+        "atl": "atl",
+        "52w_ath": "ath52w",
+        "52w_atl": "atl52w",
+      };
+      params.set("type", typeMap[activeTab]);
       const res = await apiRequest("GET", `/api/ath-atl?${params.toString()}`);
       return (await res.json()) as ATHATLResponse;
     },
   });
 
-  // 自動在元件 mount 時獲取資料
-  // 如果回傳空陣列，自動重試一次（可能是伺服器正在快取暖機）
+  // 使用者切換 tab 時獲取對應資料
   useEffect(() => {
     mutation.mutate();
-  }, []);
+  }, [activeTab, exchange]);
 
   // Auto-retry if data is empty (server might be warming cache)
   useEffect(() => {
+    const currentData = activeTab === "ath" 
+      ? mutation.data?.ath 
+      : activeTab === "atl" 
+      ? mutation.data?.atl
+      : activeTab === "52w_ath" 
+      ? mutation.data?.ath52w
+      : mutation.data?.atl52w;
+      
     if (mutation.isSuccess && 
         mutation.data && 
-        mutation.data.ath.length === 0 && 
-        mutation.data.atl.length === 0 && 
-        mutation.data.ath52w.length === 0 && 
-        mutation.data.atl52w.length === 0 &&
+        (!currentData || currentData.length === 0) &&
         mutation.failureCount < 2) {
       const timer = setTimeout(() => {
         console.log("[ATH-ATL] Empty data received, retrying...");
@@ -176,7 +188,7 @@ export default function ATHATLPage() {
       }, 3000);
       return () => clearTimeout(timer);
     }
-  }, [mutation.isSuccess, mutation.data, mutation.failureCount]);
+  }, [mutation.isSuccess, mutation.data, mutation.failureCount, activeTab]);
 
   const data = mutation.data;
   const records = activeTab === "ath" 
@@ -352,7 +364,7 @@ export default function ATHATLPage() {
           </div>
 
           {/* 資料更新時間 */}
-          {data?.lastUpdated && (
+          {(activeTab === "ath" || activeTab === "atl" ? data?.lastUpdated : data?.lastUpdated52w) && (
             <div className="flex items-center gap-2 mt-3">
               {isMarketHours && isTodayTradeDay && (
                 <Badge variant="outline" className="bg-amber-500/20 text-amber-500 border-amber-500/40">
@@ -361,7 +373,7 @@ export default function ATHATLPage() {
                 </Badge>
               )}
               <p className="text-xs text-muted-foreground">
-                資料更新時間：{new Date(data.lastUpdated).toLocaleString("zh-TW")}
+                資料更新時間：{new Date(activeTab === "ath" || activeTab === "atl" ? data!.lastUpdated : data!.lastUpdated52w).toLocaleString("zh-TW")}
               </p>
             </div>
           )}

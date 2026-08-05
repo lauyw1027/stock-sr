@@ -199,6 +199,9 @@ export async function registerRoutes(
       const exchange = _req.query.exchange as string || "all";
       const refresh = _req.query.refresh === "true";
       
+      // 判斷是否需要52週資料
+      const needs52w = type === "all" || type === "ath52w" || type === "atl52w";
+      
       // 取得 ATH/ATL 資料
       let data = getCachedData();
       if (!data || refresh) {
@@ -206,16 +209,19 @@ export async function registerRoutes(
         data = await scanAthAtl(refresh);
       }
       
-      // 取得52週資料
-      const data52w = await scan52wAthAtl(refresh);
+      // 只在需要時取得52週資料
+      let data52w = null;
+      if (needs52w) {
+        data52w = await scan52wAthAtl(refresh);
+      }
       
       let result = {
         ath: data.ath,
         atl: data.atl,
-        ath52w: data52w.ath52w,
-        atl52w: data52w.atl52w,
+        ath52w: data52w?.ath52w || [],
+        atl52w: data52w?.atl52w || [],
         lastUpdated: data.lastUpdated,
-        lastUpdated52w: data52w.lastUpdated,
+        lastUpdated52w: data52w?.lastUpdated || "",
       };
       
       // 過濾交易所

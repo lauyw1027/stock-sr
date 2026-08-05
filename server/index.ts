@@ -76,7 +76,6 @@ app.use((req, res, next) => {
       // Second: Then scan ATH/ATL (now US_STOCKS is populated)
       console.log("[Startup] Pre-warming ATH/ATL cache...");
       await scanAthAtl(false);
-      await scan52wAthAtl(false);
       console.log("[Startup] Cache pre-warming complete");
     } catch (e) {
       console.error("[Startup] Initialization failed:", e);
