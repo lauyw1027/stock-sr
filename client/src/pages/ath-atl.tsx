@@ -90,6 +90,8 @@ interface ATHATLRecord {
   change_pct: number;
   volume: number;
   list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
+  next_earnings_date: string | null;
+  days_to_earnings: number | null;
 }
 
 interface ATHATLResponse {
@@ -409,6 +411,7 @@ export default function ATHATLPage() {
                       <TableHead className="text-right">漲跌幅</TableHead>
                       <TableHead className="text-right">成交量</TableHead>
                       <TableHead className="text-right">創建日期</TableHead>
+                      <TableHead className="text-right">距財報</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -455,6 +458,22 @@ export default function ATHATLPage() {
                           {(activeTab === "ath" || activeTab === "52w_ath")
                             ? formatDate(record.ath_date)
                             : formatDate(record.atl_date)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          {record.days_to_earnings !== null ? (
+                            <span
+                              className={
+                                record.days_to_earnings <= 3
+                                  ? "text-orange-500 font-medium"
+                                  : ""
+                              }
+                              title={record.next_earnings_date ? `財報日期: ${record.next_earnings_date}` : ""}
+                            >
+                              {record.days_to_earnings}天
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground text-xs">無資料</span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

@@ -28,6 +28,59 @@ function formatDate(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
+// Earnings date cache - 8 hours TTL
+interface EarningsCacheEntry {
+  date: string | null;
+  daysUntil: number | null;
+  cachedAt: number;
+}
+const earningsCache: Map<string, EarningsCacheEntry> = new Map();
+const EARNINGS_CACHE_TTL_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/**
+ * Get next earnings date for a symbol with caching
+ */
+async function getNextEarningsDate(symbol: string): Promise<{ date: string | null; daysUntil: number | null }> {
+  const now = Date.now();
+  
+  // Check cache first
+  const cached = earningsCache.get(symbol);
+  if (cached && (now - cached.cachedAt) < EARNINGS_CACHE_TTL_MS) {
+    return { date: cached.date, daysUntil: cached.daysUntil };
+  }
+
+  try {
+    const result = await yahooFinance.quoteSummary(symbol, { modules: ["calendarEvents"] });
+    const earningsDates = result?.calendarEvents?.earnings?.earningsDate;
+
+    if (!earningsDates || earningsDates.length === 0) {
+      // Cache negative result too
+      earningsCache.set(symbol, { date: null, daysUntil: null, cachedAt: now });
+      return { date: null, daysUntil: null };
+    }
+
+    const nextDate = new Date(earningsDates[0]);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const diffMs = nextDate.getTime() - today.getTime();
+    const daysUntil = Math.round(diffMs / (1000 * 60 * 60 * 24));
+
+    const earningsResult = {
+      date: formatDate(nextDate),
+      daysUntil: daysUntil >= 0 ? daysUntil : null,
+    };
+
+    // Cache the result
+    earningsCache.set(symbol, { ...earningsResult, cachedAt: now });
+    return earningsResult;
+  } catch (e) {
+    console.error(`[Earnings] Error fetching earnings date for ${symbol}:`, e);
+    // Cache negative result on error too
+    earningsCache.set(symbol, { date: null, daysUntil: null, cachedAt: now });
+    return { date: null, daysUntil: null };
+  }
+}
+
 export type Exchange = "NYSE" | "NASDAQ" | "AMEX";
 
 export interface StockInfo {
@@ -49,6 +102,8 @@ export interface ATHATLRecord {
   change_pct: number;
   volume: number;
   list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
+  next_earnings_date: string | null;
+  days_to_earnings: number | null;
 }
 
 // ============ Stock List Fetching Functions ============
@@ -784,12 +839,16 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 5);
 
-    // 使用 .chart() 避免 historical() 的 null 值嚴格檢查
-    const chart = await yahooFinance.chart(stock.symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    });
+    // Parallel fetch: chart data and earnings date
+    const [chart, earningsInfo] = await Promise.all([
+      yahooFinance.chart(stock.symbol, {
+        period1: startDate,
+        period2: endDate,
+        interval: "1d",
+      }),
+      getNextEarningsDate(stock.symbol),
+    ]);
+
     const hist = chart?.quotes ?? [];
 
     if (!hist || hist.length < 10) {
@@ -847,6 +906,8 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "ATH",
+        next_earnings_date: earningsInfo.date,
+        days_to_earnings: earningsInfo.daysUntil,
       };
     } else {
       return {
@@ -861,6 +922,8 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "ATL",
+        next_earnings_date: earningsInfo.date,
+        days_to_earnings: earningsInfo.daysUntil,
       };
     }
   } catch (e) {
@@ -966,12 +1029,16 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
 
-    // 使用 .chart() 避免 historical() 的 null 值嚴格檢查
-    const chart = await yahooFinance.chart(stock.symbol, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    });
+    // Parallel fetch: chart data and earnings date
+    const [chart, earningsInfo] = await Promise.all([
+      yahooFinance.chart(stock.symbol, {
+        period1: startDate,
+        period2: endDate,
+        interval: "1d",
+      }),
+      getNextEarningsDate(stock.symbol),
+    ]);
+
     const hist = chart?.quotes ?? [];
 
     if (!hist || hist.length < 50) {
@@ -1034,6 +1101,8 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "52W_ATH",
+        next_earnings_date: earningsInfo.date,
+        days_to_earnings: earningsInfo.daysUntil,
       };
     } else {
       return {
@@ -1049,6 +1118,8 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "52W_ATL",
+        next_earnings_date: earningsInfo.date,
+        days_to_earnings: earningsInfo.daysUntil,
       };
     }
   } catch (e) {
