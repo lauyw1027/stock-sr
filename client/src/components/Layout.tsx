@@ -12,6 +12,7 @@ const NAV_LINKS = [
   { href: "/divergence", label: "背離掃描" },
   { href: "/carry-risk", label: "市場風險" },
   { href: "/credit-monitor", label: "信用風險監控" },
+  { href: "/credit-spread", label: "信用價差" },
   { href: "/about", label: "關於" },
 ];
 

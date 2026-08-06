@@ -14,6 +14,7 @@ import { analyzeDivergence, fetchCandles, type Timeframe, type DivergenceResult,
 import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./divergence-scan";
 import { registerCreditMonitorRoutes } from "./routes/creditMonitor";
 import { registerCarryTradeRoutes } from "./routes/carryTrade";
+import { scanCreditSpreadOpportunities } from "./creditSpreadScanner";
 
 // yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
@@ -374,6 +375,30 @@ export async function registerRoutes(
         message: `無法從 Yahoo Finance 取得「${req.query.symbol}」的資料，請確認代號是否正確。`,
         detail: (e?.message || "").toString().slice(0, 200),
       });
+    }
+  });
+
+  // 信用價差推薦 API
+  app.get("/api/credit-spread-recommendations", async (req: Request, res: Response) => {
+    try {
+      const style = (req.query.style as "conservative" | "balanced" | "aggressive") || "balanced";
+      
+      // 只使用 ATH/ATL（不使用 52W）
+      const athAtlData = await scanAthAtl(false);
+      
+      // 合併 ATH 和 ATL 候選股票
+      const allStocks = [
+        ...athAtlData.ath,
+        ...athAtlData.atl,
+      ];
+      
+      // 執行信用價差掃描
+      const result = await scanCreditSpreadOpportunities(allStocks, style);
+      
+      res.json(result);
+    } catch (e: any) {
+      console.error("[API] Credit Spread error:", e);
+      res.status(500).json({ error: "Failed to generate credit spread recommendations", detail: e.message });
     }
   });
 

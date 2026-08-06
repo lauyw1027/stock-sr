@@ -16,7 +16,7 @@ const DATA_DIR = (() => {
 
 // Initialize YahooFinance (same as in routes.ts)
 const YahooFinance: any = (YahooFinancePkg as any).default ?? YahooFinancePkg;
-const yahooFinance = new YahooFinance({
+export const yahooFinance = new YahooFinance({
   suppressNotices: ["yahooSurvey", "ripHistorical"],
 });
 
@@ -780,7 +780,7 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   console.log(`[ATH-ATL] Starting scan for ${stocksToScan.length} stocks...`);
 
   // 批量處理，每批 50 個 (increased for speed)
-  const batchSize = 50;
+  const batchSize = 25;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[ATH-ATL] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
@@ -972,7 +972,7 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
   console.log(`[52W] Starting scan for ${stocksToScan.length} stocks...`);
 
   // 批量處理，每批 50 個
-  const batchSize = 50;
+  const batchSize = 25;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[52W] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);

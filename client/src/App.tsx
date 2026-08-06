@@ -12,6 +12,7 @@ import ATHATL from "@/pages/ath-atl";
 import Divergence from "@/pages/divergence";
 import CreditMonitorPage from "@/pages/CreditMonitorPage";
 import CarryTradeRiskPage from "@/pages/CarryTradeRiskPage";
+import CreditSpread from "@/pages/creditSpread";
 
 function AppRouter() {
   return (
@@ -22,6 +23,7 @@ function AppRouter() {
       <Route path="/divergence" component={Divergence} />
       <Route path="/credit-monitor" component={CreditMonitorPage} />
       <Route path="/carry-risk" component={CarryTradeRiskPage} />
+      <Route path="/credit-spread" component={CreditSpread} />
       <Route component={NotFound} />
     </Switch>
   );
