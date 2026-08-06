@@ -488,6 +488,9 @@ export async function getOptionChainWithDelta(
       return null;
     }
 
+    const now2 = new Date();
+    const r = 0.045; // TODO: 未來可改成動態抓取無風險利率
+
     // 印出 impliedVolatility 原始數值範例以確認單位
     const sampleCall = expirationData.calls.find((c: any) => c.impliedVolatility != null);
     if (sampleCall) {
@@ -495,9 +498,6 @@ export async function getOptionChainWithDelta(
       const sampleDelta = calculateCallDelta(currentPrice, sampleCall.strike, sampleT, r, sampleCall.impliedVolatility);
       console.log(`[OptionChain] ${symbol} impliedVolatility 範例: ${sampleCall.impliedVolatility} (strike: ${sampleCall.strike}, 對應Delta: ${sampleDelta.toFixed(4)})`);
     }
-
-    const now2 = new Date();
-    const r = 0.045; // TODO: 未來可改成動態抓取無風險利率
 
     const MIN_VALID_IV = 0.02; // 低於此門檻視為Yahoo的無效佔位值
 
