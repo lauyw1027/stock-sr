@@ -15,6 +15,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+import {
   TrendingUp,
   TrendingDown,
   Search,
@@ -29,8 +35,8 @@ import {
 async function getNYSEHolidays(year: number): Promise<Set<string>> {
   try {
     const module = await import("nyse-holidays");
-    const holidays = module.nyseHolidays(year);
-    return new Set(holidays.map((h: { date: string }) => h.date));
+    const holidays = module.getHolidays(year);
+    return new Set(holidays.map((h: any) => h.date.toISOString().split("T")[0]));
   } catch (e) {
     console.error("[ATH-ATL] Failed to load nyse-holidays:", e);
     return new Set();
@@ -81,7 +87,6 @@ interface ATHATLRecord {
   symbol: string;
   company_name: string;
   exchange: string;
-  industry: string;
   last_close: number;
   ath_price: number | null;
   ath_date: string | null;
@@ -92,6 +97,24 @@ interface ATHATLRecord {
   list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
   next_earnings_date: string | null;
   days_to_earnings: number | null;
+  // Valuation fields
+  forwardPE: number | null;
+  pegNearTerm: number | null;
+  pegLongTerm: number | null;
+  nearTermGrowthPct: number | null;
+  longTermGrowthPct: number | null;
+  priceToSales: number | null;
+  priceToBook: number | null;
+  peBookHistoricalPercentile: number | null;
+  dividendYield: number | null;
+  sectorCategory: string;
+  primaryValuationMetric: string;
+  isProfitable: boolean | null;
+  sector: string | null;
+  industry: string | null;
+  // Peer comparison fields
+  peerAvgForwardPE: number | null;
+  peerCount: number;
 }
 
 interface ATHATLResponse {
@@ -109,6 +132,27 @@ type SortField = "change_pct" | "volume" | "ath_date" | "atl_date";
 type SortOrder = "asc" | "desc";
 
 const EXCHANGES = ["all", "NYSE", "NASDAQ", "AMEX"] as const;
+
+// Sector category grouping constants
+const CATEGORY_ORDER: string[] = [
+  "growth_consumer",
+  "mature_stable",
+  "growth_software",
+  "cyclical",
+  "asset_heavy",
+  "early_stage_loss",
+  "unclassified",
+];
+
+const CATEGORY_LABELS: Record<string, string> = {
+  growth_consumer: "高成長消費",
+  mature_stable: "成熟穩定型",
+  growth_software: "高成長軟體",
+  cyclical: "週期性行業",
+  asset_heavy: "資產密集型",
+  early_stage_loss: "早期虧損",
+  unclassified: "未分類",
+};
 
 export default function ATHATLPage() {
   const [activeTab, setActiveTab] = useState<TabType>("ath");
@@ -241,7 +285,25 @@ export default function ATHATLPage() {
     });
 
     return result;
-  }, [records, search, sortOrder, activeTab]);
+  }, [records, search, sortOrder, sortField]);
+
+  // Group records by sector category
+  const groupedRecords = useMemo(() => {
+    const groups = new Map<string, ATHATLRecord[]>();
+    for (const record of filteredAndSorted) {
+      const cat = record.sectorCategory || "unclassified";
+      if (!groups.has(cat)) groups.set(cat, []);
+      groups.get(cat)!.push(record);
+    }
+
+    return CATEGORY_ORDER
+      .filter((cat) => groups.has(cat) && groups.get(cat)!.length > 0)
+      .map((cat) => ({ 
+        category: cat, 
+        label: CATEGORY_LABELS[cat], 
+        records: groups.get(cat)! 
+      }));
+  }, [filteredAndSorted]);
 
   const handleSort = (field: SortField) => {
     if (sortField === field) {
@@ -261,6 +323,58 @@ export default function ATHATLPage() {
   const formatPrice = (p: number) => "$" + p.toFixed(2);
 
   const formatDate = (d: string | null) => d || "N/A";
+
+// Helper function to format percentile as semantic description
+function formatPercentile(percentile: number | null, metricName: string): string {
+  if (percentile === null) return "N/A";
+  if (percentile >= 80) return `高於過去3年${percentile}%的時間（相對自己偏貴）`;
+  if (percentile >= 60) return `高於過去3年${percentile}%的時間（略偏高）`;
+  if (percentile >= 40) return `位於過去3年中間區間（相對正常）`;
+  if (percentile >= 20) return `低於過去3年${100 - percentile}%的時間（略偏低）`;
+  return `低於過去3年${100 - percentile}%的時間（相對自己便宜）`;
+}
+
+// Helper function to format valuation value
+function formatValuation(value: number | null, suffix: string = ""): string {
+  if (value === null) return "";
+  return value.toFixed(2) + suffix;
+}
+
+// Get sector category display
+function getSectorCategoryDisplay(category: string | undefined): { label: string; color: string } {
+  const map: Record<string, { label: string; color: string }> = {
+    mature_stable: { label: "成熟穩定型", color: "text-blue-500" },
+    cyclical: { label: "週期性行業", color: "text-orange-500" },
+    asset_heavy: { label: "資產密集型", color: "text-yellow-500" },
+    growth_consumer: { label: "高成長消費", color: "text-green-500" },
+    growth_software: { label: "高成長軟體", color: "text-purple-500" },
+    early_stage_loss: { label: "早期虧損", color: "text-gray-500" },
+    unclassified: { label: "未分類", color: "text-muted-foreground" },
+  };
+  return map[category || ""] || map.unclassified;
+}
+
+// Helper function to determine if PEG should be shown for this sector category
+function shouldShowPEG(category: string): boolean {
+  return category !== "early_stage_loss" && category !== "growth_software" && category !== "cyclical" && category !== "asset_heavy";
+}
+
+// Helper function to get PEG display note based on sector category
+function getPEGDisplayNote(category: string): string | null {
+  if (category === "early_stage_loss" || category === "growth_software") return "此類型不適用";
+  if (category === "cyclical" || category === "asset_heavy") return "參考性低";
+  return null;
+}
+
+// Helper function for percentile badge styling
+function getPercentileBadge(percentile: number | null): { text: string; className: string } | null {
+  if (percentile === null) return null;
+  if (percentile >= 80) return { text: "偏貴", className: "text-orange-500 border-orange-500/40 bg-orange-500/10" };
+  if (percentile >= 60) return { text: "略高", className: "text-yellow-500 border-yellow-500/40 bg-yellow-500/10" };
+  if (percentile >= 40) return { text: "正常", className: "text-muted-foreground border-border" };
+  if (percentile >= 20) return { text: "略低", className: "text-blue-400 border-blue-400/40 bg-blue-400/10" };
+  return { text: "偏低", className: "text-green-500 border-green-500/40 bg-green-500/10" };
+}
 
   const getExchangeBadge = (ex: string) => {
     const colors: Record<string, string> = {
@@ -407,90 +521,212 @@ export default function ATHATLPage() {
                 </p>
               </Card>
             ) : (
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>代碼</TableHead>
-                      <TableHead>公司名稱</TableHead>
-                      <TableHead>交易所</TableHead>
-                      <TableHead className="text-right">價格</TableHead>
-                      <TableHead className="text-right">
-                        {activeTab === "ath" || activeTab === "52w_ath" 
-                          ? (activeTab === "ath" ? "近5日歷史新高" : "52週新高")
-                          : (activeTab === "atl" ? "近5日歷史新低" : "52週新低")}
-                      </TableHead>
-                      <TableHead className="text-right">漲跌幅</TableHead>
-                      <TableHead className="text-right">成交量</TableHead>
-                      <TableHead className="text-right">創建日期</TableHead>
-                      <TableHead className="text-right">距財報</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filteredAndSorted.map((record) => (
-                      <TableRow
-                        key={record.symbol}
-                        className={activeTab === "ath" ? "bg-green-500/5" : "bg-red-500/5"}
-                      >
-                        <TableCell className="font-mono font-medium">
-                          {record.symbol}
-                        </TableCell>
-                        <TableCell className="max-w-[200px] truncate">
-                          {record.company_name}
-                        </TableCell>
-                        <TableCell>
-                          <Badge variant="outline" className={getExchangeBadge(record.exchange)}>
-                            {record.exchange}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {formatPrice(record.last_close)}
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {(activeTab === "ath" || activeTab === "52w_ath")
-                            ? formatPrice(record.ath_price || 0)
-                            : formatPrice(record.atl_price || 0)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          <span
-                            className={
-                              record.change_pct >= 0
-                                ? "text-green-500"
-                                : "text-red-500"
-                            }
-                          >
-                            {record.change_pct >= 0 ? "+" : ""}
-                            {record.change_pct.toFixed(2)}%
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-right font-mono">
-                          {formatVolume(record.volume)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {(activeTab === "ath" || activeTab === "52w_ath")
-                            ? formatDate(record.ath_date)
-                            : formatDate(record.atl_date)}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {record.days_to_earnings !== null ? (
-                            <span
-                              className={
-                                record.days_to_earnings <= 3
-                                  ? "text-orange-500 font-medium"
-                                  : ""
-                              }
-                              title={record.next_earnings_date ? `財報日期: ${record.next_earnings_date}` : ""}
+              <div className="space-y-6">
+                {groupedRecords.map(({ category, label, records }) => (
+                  <div key={category} className="space-y-2">
+                    {/* Category Header */}
+                    <div className="flex items-center gap-2 sticky top-0 bg-background/95 backdrop-blur-sm py-2 z-10 border-b border-border">
+                      <h3 className={`text-sm font-semibold ${getSectorCategoryDisplay(category).color}`}>
+                        {label}
+                      </h3>
+                      <Badge variant="outline" className="text-xs">{records.length} 檔</Badge>
+                      <span className="text-xs text-muted-foreground">
+                        主要指標：{records[0]?.primaryValuationMetric}
+                      </span>
+                    </div>
+
+                    {/* Table for this category */}
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="py-2">代碼</TableHead>
+                            <TableHead className="py-2">公司名稱</TableHead>
+                            <TableHead className="max-w-[160px] py-2">產業</TableHead>
+                            <TableHead className="text-right py-2">價格</TableHead>
+                            <TableHead className="text-right py-2">
+                              {activeTab === "ath" || activeTab === "52w_ath" 
+                                ? (activeTab === "ath" ? "近5日歷史新高" : "52週新高")
+                                : (activeTab === "atl" ? "近5日歷史新低" : "52週新低")}
+                            </TableHead>
+                            <TableHead className="text-right py-2">創建日期</TableHead>
+                            <TableHead className="text-right py-2">距財報</TableHead>
+                            <TableHead className="text-right py-2">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="cursor-help underline decoration-dotted decoration-muted-foreground">
+                                    Forward P/E
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs max-w-[250px]">
+                                      股價 ÷ 未來12個月預估每股盈餘。數字愈低代表用愈少的價格買到相同的預期盈餘，但需搭配同業比較，不同產業合理區間差異很大。
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableHead>
+                            <TableHead className="text-right py-2">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="cursor-help underline decoration-dotted decoration-muted-foreground">
+                                    PEG
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs max-w-[250px]">
+                                      股價 ÷ 預估成長率。1.0-2.0較為合理，&gt;2.5相對昂貴，&lt;1.0相對便宜。週期性/資產密集型股票的PEG參考性較低，早期虧損股不適用。
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableHead>
+                            <TableHead className="text-right py-2">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="cursor-help underline decoration-dotted decoration-muted-foreground">
+                                    P/S
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs max-w-[250px]">
+                                      股價 ÷ 每股營收(過去12個月)。常用於還未盈利或成長期公司，數字愈低代表相對營收付出的價格愈低，早期虧損股與高成長軟體股主要參考這項指標。
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableHead>
+                            <TableHead className="text-right py-2">
+                              <TooltipProvider>
+                                <Tooltip>
+                                  <TooltipTrigger className="cursor-help underline decoration-dotted decoration-muted-foreground">
+                                    P/B
+                                  </TooltipTrigger>
+                                  <TooltipContent>
+                                    <p className="text-xs max-w-[250px]">
+                                      股價 ÷ 每股淨資產(帳面價值)。金融股、資產密集型(地產/REITs)常用這項指標，數字愈低代表股價相對帳面資產愈便宜，需注意帳面價值本身可能被高估或低估。
+                                    </p>
+                                  </TooltipContent>
+                                </Tooltip>
+                              </TooltipProvider>
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {records.map((record) => (
+                            <TableRow
+                              key={record.symbol}
+                              className={activeTab === "ath" ? "bg-green-500/5" : "bg-red-500/5"}
                             >
-                              {record.days_to_earnings}天
-                            </span>
-                          ) : (
-                            <span className="text-muted-foreground text-xs">無資料</span>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                              <TableCell className="font-mono font-medium py-2">
+                                <div className="flex items-center gap-2">
+                                  {record.symbol}
+                                </div>
+                              </TableCell>
+                              <TableCell className="max-w-[200px] truncate py-2">
+                                {record.company_name}
+                              </TableCell>
+                              <TableCell className="max-w-[160px] text-xs py-2">
+                                {record.industry ? (
+                                  <div className="leading-tight">
+                                    <div className="truncate">{record.industry}</div>
+                                    {record.sector && <div className="text-muted-foreground truncate">{record.sector}</div>}
+                                  </div>
+                                ) : record.sector ? (
+                                  <span className="text-muted-foreground">{record.sector}</span>
+                                ) : (
+                                  <span className="text-muted-foreground">N/A</span>
+                                )}
+                              </TableCell>
+                              <TableCell className="text-right font-mono py-2">
+                                {formatPrice(record.last_close)}
+                              </TableCell>
+                              <TableCell className="text-right font-mono py-2">
+                                {(activeTab === "ath" || activeTab === "52w_ath")
+                                  ? formatPrice(record.ath_price || 0)
+                                  : formatPrice(record.atl_price || 0)}
+                              </TableCell>
+                              <TableCell className="text-right py-2">
+                                {(activeTab === "ath" || activeTab === "52w_ath")
+                                  ? formatDate(record.ath_date)
+                                  : formatDate(record.atl_date)}
+                              </TableCell>
+                              <TableCell className="text-right py-2">
+                                {record.days_to_earnings !== null ? (
+                                  <span
+                                    className={
+                                      record.days_to_earnings <= 3
+                                        ? "text-orange-500 font-medium"
+                                        : ""
+                                    }
+                                    title={record.next_earnings_date ? `財報日期: ${record.next_earnings_date}` : ""}
+                                  >
+                                    {record.days_to_earnings}天
+                                  </span>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">無資料</span>
+                                )}
+                              </TableCell>
+                              {/* Forward P/E */}
+                              <TableCell className="text-right py-2">
+                                {record.forwardPE !== null ? (
+                                  <div>
+                                    <span className="font-mono">{formatValuation(record.forwardPE)}</span>
+                                    {record.peerAvgForwardPE !== null && (
+                                      <div className="text-xs text-muted-foreground" title={`基於${record.peerCount}家同業公司的Forward P/E中位數`}>
+                                        同業: {record.peerAvgForwardPE.toFixed(2)}
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">N/A</span>
+                                )}
+                              </TableCell>
+                              {/* PEG with simplified display */}
+                              <TableCell className="text-right py-2">
+                                {shouldShowPEG(record.sectorCategory) && record.pegNearTerm !== null ? (
+                                  <span className="font-mono">{formatValuation(record.pegNearTerm)}</span>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">
+                                    {getPEGDisplayNote(record.sectorCategory) ?? "N/A"}
+                                  </span>
+                                )}
+                              </TableCell>
+                              {/* P/S */}
+                              <TableCell className="text-right py-2">
+                                {record.priceToSales !== null ? (
+                                  <span className="font-mono">{formatValuation(record.priceToSales)}</span>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">N/A</span>
+                                )}
+                              </TableCell>
+                              {/* P/B with percentile badge */}
+                              <TableCell className="text-right py-2">
+                                {record.priceToBook !== null ? (
+                                  <div className="flex justify-end items-center">
+                                    <span className="font-mono mr-2">{formatValuation(record.priceToBook)}</span>
+                                    {record.peBookHistoricalPercentile !== null && (
+                                      (() => {
+                                        const badge = getPercentileBadge(record.peBookHistoricalPercentile);
+                                        return badge ? (
+                                          <span 
+                                            title={formatPercentile(record.peBookHistoricalPercentile, "P/B")} 
+                                            className={`inline-flex items-center rounded px-1.5 py-0.5 text-xs border cursor-help ${badge.className}`}
+                                          >
+                                            {badge.text}
+                                          </span>
+                                        ) : null;
+                                      })()
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-muted-foreground text-xs">N/A</span>
+                                )}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </>

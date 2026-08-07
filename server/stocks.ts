@@ -89,11 +89,20 @@ export interface StockInfo {
   companyName: string;
 }
 
+export type SectorCategory =
+  | "mature_stable"
+  | "cyclical"
+  | "asset_heavy"
+  | "growth_consumer"
+  | "growth_software"
+  | "early_stage_loss"
+  | "unclassified";
+
 export interface ATHATLRecord {
   symbol: string;
   company_name: string;
   exchange: string;
-  industry: string;
+  industry: string;  // Original field for backward compatibility
   last_close: number;
   ath_price: number | null;
   ath_date: string | null;
@@ -104,6 +113,597 @@ export interface ATHATLRecord {
   list_type: "ATH" | "ATL" | "52W_ATH" | "52W_ATL";
   next_earnings_date: string | null;
   days_to_earnings: number | null;
+  // Valuation fields
+  forwardPE: number | null;
+  pegNearTerm: number | null;
+  pegLongTerm: number | null;
+  nearTermGrowthPct: number | null;
+  longTermGrowthPct: number | null;
+  priceToSales: number | null;
+  priceToBook: number | null;
+  peBookHistoricalPercentile: number | null;
+  dividendYield: number | null;
+  sectorCategory: SectorCategory;
+  primaryValuationMetric: string;
+  isProfitable: boolean | null;
+  sector: string | null;      // GICS Sector 原始名稱，例如 "Consumer Cyclical"
+  gicsIndustry: string | null; // GICS Industry 原始名稱，例如 "Household & Personal Products"
+  // Peer comparison fields
+  peerAvgForwardPE: number | null;
+  peerCount: number;
+}
+
+// ============ Sector Classification Functions ============
+
+function classifySectorCategory(sector: string | undefined, industry: string | undefined, isProfitable: boolean | null): SectorCategory {
+  const s = (sector ?? "").toLowerCase();
+  const i = (industry ?? "").toLowerCase();
+
+  if (isProfitable === false) return "early_stage_loss";
+
+  if (i.includes("reit") || i.includes("real estate")) return "asset_heavy";
+
+  if (s.includes("energy") || i.includes("steel") || i.includes("chemical") || i.includes("materials")) return "cyclical";
+
+  if (s.includes("financial") || s.includes("utilities") || i.includes("telecom")) return "mature_stable";
+
+  if (s.includes("technology") && (i.includes("software") || i.includes("internet") || i.includes("saas"))) return "growth_software";
+
+  if (s.includes("consumer") && isProfitable) return "growth_consumer";
+
+  // 新增規則:Industrials(工業股)
+  if (s.includes("industrial")) {
+    // 工業股裡的機械/設備/航太國防類，成熟現金流公司，適合用Forward P/E + PEG
+    // 沒有更細的次分類需求，統一歸為成熟穩定型的估值邏輯（Forward P/E為主，PEG次要參考）
+    return "mature_stable";
+  }
+
+  // 新增規則:Healthcare(醫療保健,非虧損型)
+  if (s.includes("healthcare")) {
+    if (i.includes("biotechnology") || i.includes("drug manufacturers")) {
+      // 生技/製藥類，盈餘品質受研發週期、專利懸崖影響大，PEG參考性較低，優先看P/S與P/B
+      return "cyclical";
+    }
+    // 醫療設備、醫療保健計劃、醫療照護設施等，較穩定的現金流業務
+    return "growth_consumer";
+  }
+
+  return "unclassified";
+}
+
+function getPrimaryMetricLabel(category: SectorCategory): string {
+  const map: Record<SectorCategory, string> = {
+    mature_stable: "Forward P/E, P/B, 股息率",
+    cyclical: "P/B歷史分位（PEG參考性低）",
+    asset_heavy: "P/B, 股息率（PEG不適用）",
+    growth_consumer: "Forward P/E + PEG",
+    growth_software: "P/S（EV/Sales等進階指標Phase 2實作，PEG常失真）",
+    early_stage_loss: "P/S（PEG不適用）",
+    unclassified: "Forward P/E + PEG（預設）",
+  };
+  return map[category];
+}
+
+// ============ Valuation Metrics Functions ============
+
+interface ValuationData {
+  forwardPE: number | null;
+  pegNearTerm: number | null;
+  pegLongTerm: number | null;
+  nearTermGrowthPct: number | null;
+  longTermGrowthPct: number | null;
+  priceToSales: number | null;
+  priceToBook: number | null;
+  peBookHistoricalPercentile: number | null;
+  dividendYield: number | null;
+  sectorCategory: SectorCategory;
+  primaryValuationMetric: string;
+  isProfitable: boolean | null;
+  sector: string | null;
+  industry: string | null;
+  // Peer comparison fields
+  peerAvgForwardPE: number | null;
+  peerCount: number;
+}
+
+const valuationCache = new Map<string, { data: ValuationData; cachedAt: number }>();
+const VALUATION_CACHE_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
+
+/**
+ * Get valuation metrics for a symbol with 12-hour caching
+ */
+async function getValuationMetrics(
+  symbol: string,
+  options: { includePeerData?: boolean } = {}
+): Promise<ValuationData> {
+  const now = Date.now();
+  const includePeerData = options.includePeerData ?? false;
+  const cached = valuationCache.get(symbol);
+
+  const cacheValid = cached && (now - cached.cachedAt) < VALUATION_CACHE_TTL_MS;
+  const cachedHasPeerData = cached && (cached.data.peerAvgForwardPE !== null || cached.data.peerCount > 0);
+
+  // If cache is valid and we don't need peer data, or cache already has peer data
+  if (cacheValid && (!includePeerData || cachedHasPeerData)) {
+    return cached.data;
+  }
+
+  // If basic valuation is cached but we need peer data and it's missing, only fetch peer
+  if (cacheValid && includePeerData && !cachedHasPeerData) {
+    const peerPEResult = await getPeerAvgForwardPE(symbol);
+    const enrichedData: ValuationData = {
+      ...cached.data,
+      peerAvgForwardPE: peerPEResult.peerAvgForwardPE,
+      peerCount: peerPEResult.peerCount,
+    };
+    valuationCache.set(symbol, { data: enrichedData, cachedAt: now });
+    return enrichedData;
+  }
+
+  // No valid cache, fetch everything
+  try {
+    // Fetch valuation data (and peer data if needed)
+    const stats = await yahooFinance.quoteSummary(symbol, {
+      modules: ["defaultKeyStatistics", "summaryDetail", "financialData", "earningsTrend", "assetProfile"],
+    });
+
+    const peerPEResult = includePeerData
+      ? await getPeerAvgForwardPE(symbol)
+      : { peerAvgForwardPE: null, peerCount: 0 };
+
+    const currentPrice = stats.financialData?.currentPrice ?? stats.summaryDetail?.previousClose ?? null;
+    const forwardEps = stats.defaultKeyStatistics?.forwardEps ?? null;
+    const forwardPE = (currentPrice && forwardEps && forwardEps > 0) ? currentPrice / forwardEps : null;
+
+    const trendData = stats.earningsTrend?.trend ?? [];
+    const nearTermTrend = trendData.find((t: any) => t.period === "+1y");
+    const longTermTrend = trendData.find((t: any) => t.period === "+5y");
+
+    const nearTermGrowthPct = nearTermTrend?.growth ? nearTermTrend.growth * 100 : null;
+    const longTermGrowthPct = longTermTrend?.growth ? longTermTrend.growth * 100 : null;
+
+    const pegNearTerm = (forwardPE && nearTermGrowthPct && nearTermGrowthPct > 0) ? forwardPE / nearTermGrowthPct : null;
+    const pegLongTerm = (forwardPE && longTermGrowthPct && longTermGrowthPct > 0) ? forwardPE / longTermGrowthPct : null;
+
+    const priceToSales = stats.summaryDetail?.priceToSalesTrailing12Months ?? null;
+    const priceToBook = stats.defaultKeyStatistics?.priceToBook ?? null;
+    const dividendYield = stats.summaryDetail?.dividendYield ?? null;
+    const netIncomeToCommon = stats.defaultKeyStatistics?.netIncomeToCommon ?? null;
+    const isProfitable = netIncomeToCommon !== null ? netIncomeToCommon > 0 : null;
+
+    const sector = stats.assetProfile?.sector ?? null;
+    const industry = stats.assetProfile?.industry ?? null;
+
+    const sectorCategory = classifySectorCategory(sector ?? undefined, industry ?? undefined, isProfitable);
+    const primaryValuationMetric = getPrimaryMetricLabel(sectorCategory);
+
+    let peBookHistoricalPercentile: number | null = null;
+
+    if (sectorCategory === "cyclical" || sectorCategory === "asset_heavy") {
+      peBookHistoricalPercentile = await calculatePBHistoricalPercentile(symbol, priceToBook);
+    }
+
+    const result: ValuationData = {
+      forwardPE, pegNearTerm, pegLongTerm, nearTermGrowthPct, longTermGrowthPct,
+      priceToSales, priceToBook, peBookHistoricalPercentile, dividendYield,
+      sectorCategory, primaryValuationMetric, isProfitable, sector, industry,
+      peerAvgForwardPE: peerPEResult.peerAvgForwardPE,
+      peerCount: peerPEResult.peerCount,
+    };
+
+    valuationCache.set(symbol, { data: result, cachedAt: now });
+    return result;
+
+  } catch (e) {
+    console.error(`[Valuation] Error fetching valuation for ${symbol}:`, e);
+    const nullResult: ValuationData = {
+      forwardPE: null, pegNearTerm: null, pegLongTerm: null, nearTermGrowthPct: null, longTermGrowthPct: null,
+      priceToSales: null, priceToBook: null, peBookHistoricalPercentile: null, dividendYield: null,
+      sectorCategory: "unclassified", primaryValuationMetric: getPrimaryMetricLabel("unclassified"), isProfitable: null,
+      sector: null, industry: null,
+      peerAvgForwardPE: null,
+      peerCount: 0,
+    };
+    valuationCache.set(symbol, { data: nullResult, cachedAt: now });
+    return nullResult;
+  }
+}
+
+/**
+ * Calculate P/B historical percentile using 3-year price data
+ * This is an approximation method - calculates implied book value from current P/B
+ * and compares historical price-derived P/B values
+ */
+async function calculatePBHistoricalPercentile(symbol: string, currentPB: number | null): Promise<number | null> {
+  if (!currentPB) return null;
+
+  try {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setFullYear(startDate.getFullYear() - 3);
+
+    const chart = await yahooFinance.chart(symbol, { period1: startDate, period2: endDate, interval: "1mo" });
+    const quotes = chart?.quotes ?? [];
+
+    if (quotes.length < 12) return null;
+
+    const currentPrice = quotes[quotes.length - 1]?.close;
+    if (!currentPrice) return null;
+
+    const impliedBookValue = currentPrice / currentPB;
+    if (!impliedBookValue || impliedBookValue <= 0) return null;
+
+    const historicalPBs = quotes
+      .map((q: any) => q.close / impliedBookValue)
+      .filter((pb: number) => isFinite(pb) && pb > 0);
+
+    if (historicalPBs.length < 12) return null;
+
+    const sorted = [...historicalPBs].sort((a, b) => a - b);
+    let rank = 0;
+    for (const pb of sorted) {
+      if (currentPB > pb) rank++;
+    }
+
+    return Math.round((rank / sorted.length) * 100);
+  } catch (e) {
+    console.error(`[Valuation] Error calculating PB percentile for ${symbol}:`, e);
+    return null;
+  }
+}
+
+// ============ Peer Comparison Functions ============
+
+interface PeerCacheEntry {
+  peers: string[];
+  cachedAt: number;
+}
+
+interface PeerSymbolsResult {
+  peers: string[];
+  fetched: boolean; // true if FMP returned a valid response (success or empty), false if failed
+}
+
+const peerListCache = new Map<string, PeerCacheEntry>();
+const PEER_LIST_CACHE_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days (同業關係變動很慢)
+
+/**
+ * Extract peer symbols from FMP stable endpoint response
+ * Supports the new format: [{ symbol, companyName, price, mktCap }, ...]
+ */
+function extractPeerSymbols(data: unknown): { peers: string[]; recognized: boolean } {
+  const maxPeers = 8;
+
+  const normalizeSymbols = (values: unknown[]): string[] => {
+    const unique: string[] = [];
+    const seen = new Set<string>();
+    for (const value of values) {
+      if (typeof value === "string" && value.trim().length > 0) {
+        const normalized = value.trim().toUpperCase();
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          unique.push(normalized);
+        }
+      }
+    }
+    return unique.slice(0, maxPeers);
+  };
+
+  // Format A: New stable endpoint - direct array of peer company objects
+  // [{ symbol: "PFGC", companyName: "...", price: ..., mktCap: ... }, ...]
+  if (Array.isArray(data)) {
+    if (data.length === 0) {
+      // Empty array = valid response with no peers
+      return { peers: [], recognized: true };
+    }
+
+    // Extract symbol from each object in the array
+    const objectSymbols = data
+      .filter(
+        (item): item is Record<string, unknown> =>
+          item !== null && typeof item === "object" && !Array.isArray(item)
+      )
+      .map((item) => item.symbol)
+      .filter((symbol): symbol is string => typeof symbol === "string");
+
+    if (objectSymbols.length > 0) {
+      return {
+        peers: normalizeSymbols(objectSymbols),
+        recognized: true,
+      };
+    }
+
+    // Format B: Direct array of ticker strings - ["PFGC", "SYY", ...]
+    if (data.every((item) => typeof item === "string")) {
+      return {
+        peers: normalizeSymbols(data),
+        recognized: true,
+      };
+    }
+
+    // Format C: Old wrapped format - [{ symbol: "USFD", peersList: [...] }]
+    const firstItem = data[0] as Record<string, unknown>;
+    if (firstItem && typeof firstItem === "object" && !Array.isArray(firstItem)) {
+      if (Array.isArray(firstItem.peersList)) {
+        return {
+          peers: normalizeSymbols(firstItem.peersList),
+          recognized: true,
+        };
+      }
+      if (Array.isArray(firstItem.peers)) {
+        return {
+          peers: normalizeSymbols(firstItem.peers),
+          recognized: true,
+        };
+      }
+    }
+
+    return { peers: [], recognized: false };
+  }
+
+  // Format D: Non-array object with peersList/peers
+  if (data && typeof data === "object") {
+    const obj = data as Record<string, unknown>;
+    if (Array.isArray(obj.peersList)) {
+      return {
+        peers: normalizeSymbols(obj.peersList),
+        recognized: true,
+      };
+    }
+    if (Array.isArray(obj.peers)) {
+      return {
+        peers: normalizeSymbols(obj.peers),
+        recognized: true,
+      };
+    }
+  }
+
+  return { peers: [], recognized: false };
+}
+
+/**
+ * Get peer symbols from FMP Stock Peers API with 30-day caching
+ * Only caches successful responses; failed requests are not cached
+ */
+async function getPeerSymbols(symbol: string): Promise<PeerSymbolsResult> {
+  const now = Date.now();
+  const cached = peerListCache.get(symbol);
+
+  if (cached && (now - cached.cachedAt) < PEER_LIST_CACHE_TTL_MS) {
+    return { peers: cached.peers, fetched: true };
+  }
+
+  const apiKey = process.env.FMP_API_KEY;
+  if (!apiKey) {
+    console.warn(`[Peers] FMP_API_KEY is not configured; skipping ${symbol}`);
+    return { peers: [], fetched: false };
+  }
+
+  try {
+    const encodedSymbol = encodeURIComponent(symbol);
+    const url = `https://financialmodelingprep.com/stable/stock-peers?symbol=${encodedSymbol}&apikey=${apiKey}`;
+
+    const res = await axios.get(url, { timeout: 15000 });
+    const parsed = extractPeerSymbols(res.data);
+
+    if (!parsed.recognized) {
+      console.error(`[Peers] Unrecognized stable FMP payload for ${symbol}`, {
+        isArray: Array.isArray(res.data),
+        firstItemKeys: Array.isArray(res.data) && res.data[0] && typeof res.data[0] === "object"
+          ? Object.keys(res.data[0] as object).slice(0, 20)
+          : [],
+      });
+      // Unrecognized format - don't cache, allow retry
+      return { peers: [], fetched: false };
+    }
+
+    // Filter out the symbol itself (safety check)
+    const peers = parsed.peers.filter(
+      (peerSymbol) => peerSymbol.toUpperCase() !== symbol.toUpperCase()
+    );
+
+    console.log(`[Peers] Parsed stable peers for ${symbol}`, {
+      peerCount: peers.length,
+      peers,
+    });
+
+    // Only cache recognized valid formats (including "recognized but actually no peers")
+    peerListCache.set(symbol, { peers, cachedAt: now });
+    return { peers, fetched: true };
+  } catch (e: any) {
+    const status = e?.response?.status;
+    // Log safe info only - don't expose URL with API key
+    console.error(`[Peers] Failed to fetch stable peers for ${symbol}`, {
+      status: status ?? "no-http-status",
+      code: e?.code ?? "unknown",
+      message: e?.message ?? "unknown error",
+    });
+    // Don't cache failed requests - allow retry on next scan
+    return { peers: [], fetched: false };
+  }
+}
+
+/**
+ * Get Forward P/E only for a symbol (lightweight function)
+ */
+
+/**
+ * Get cached Forward P/E from existing valuation cache (if available)
+ * Returns undefined if no cache entry exists (needs fallback to Yahoo Finance)
+ * Returns null if cache exists but Forward PE is null (known failure, no need to retry)
+ * Returns number if cache has valid Forward PE
+ */
+function getCachedForwardPE(symbol: string): number | null | undefined {
+  const cached = valuationCache.get(symbol);
+  if (!cached) return undefined;
+  return cached.data.forwardPE;
+}
+
+async function getForwardPEOnly(symbol: string): Promise<number | null> {
+  try {
+    const stats = await yahooFinance.quoteSummary(symbol, {
+      modules: ["defaultKeyStatistics", "financialData", "summaryDetail"],
+    });
+
+    const currentPrice = stats.financialData?.currentPrice ?? stats.summaryDetail?.previousClose ?? null;
+    const forwardEps = stats.defaultKeyStatistics?.forwardEps ?? null;
+
+    if (currentPrice && forwardEps && forwardEps > 0) {
+      return currentPrice / forwardEps;
+    }
+
+    return null;
+  } catch (e) {
+    return null;
+  }
+}
+
+interface PeerPECacheEntry {
+  peerAvgForwardPE: number | null;
+  peerCount: number;
+  cachedAt: number;
+}
+
+const peerAvgPECache = new Map<string, PeerPECacheEntry>();
+const PEER_PE_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/**
+ * Clear all peer-related caches (for manual use when FMP quota resets)
+ * Call this after FMP quota resets to allow retrying failed requests
+ */
+export function clearPeerCaches(): void {
+  peerListCache.clear();
+  peerAvgPECache.clear();
+  console.log("[Peers] Peer caches cleared");
+}
+
+/**
+ * Get peer average Forward P/E with 24-hour caching
+ * Returns median of valid peer Forward P/E values
+ */
+async function getPeerAvgForwardPE(symbol: string): Promise<{ peerAvgForwardPE: number | null; peerCount: number }> {
+  const now = Date.now();
+  const cached = peerAvgPECache.get(symbol);
+
+  if (cached && (now - cached.cachedAt) < PEER_PE_CACHE_TTL_MS) {
+    return { peerAvgForwardPE: cached.peerAvgForwardPE, peerCount: cached.peerCount };
+  }
+
+  const peerSymbolsResult = await getPeerSymbols(symbol);
+  const peerSymbols = peerSymbolsResult.peers;
+
+  if (peerSymbols.length === 0) {
+    const result = { peerAvgForwardPE: null, peerCount: 0 };
+    // Only cache empty result if FMP successfully returned "no peers"
+    // Don't cache if FMP failed (429/timeout/etc) - allow retry on next scan
+    if (peerSymbolsResult.fetched) {
+      peerAvgPECache.set(symbol, { ...result, cachedAt: now });
+    }
+    return result;
+  }
+
+  // Check cache first, only call Yahoo Finance for symbols not in valuation cache
+  const peerPEs = await Promise.all(
+    peerSymbols.map(async (p) => {
+      const cachedPE = getCachedForwardPE(p);
+      if (cachedPE !== undefined) {
+        return cachedPE; // Use cached value (includes null for known failures)
+      }
+      return getForwardPEOnly(p);
+    })
+  );
+
+  console.log(`[Peers] Forward P/E lookup for ${symbol}`, {
+    peerSymbols,
+    peerPEs,
+  });
+
+  const validPEs = peerPEs.filter((pe): pe is number => pe !== null && pe !== undefined && pe > 0 && isFinite(pe));
+
+  console.log(`[Peers] Valid peer Forward P/E for ${symbol}`, {
+    validCount: validPEs.length,
+    validPEs,
+  });
+
+  if (validPEs.length === 0) {
+    const result = { peerAvgForwardPE: null, peerCount: 0 };
+    peerAvgPECache.set(symbol, { ...result, cachedAt: now });
+    return result;
+  }
+
+  // Use median to avoid outliers
+  const sorted = [...validPEs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  const median = sorted.length % 2 === 0 ? (sorted[mid - 1] + sorted[mid]) / 2 : sorted[mid];
+
+  const result = { peerAvgForwardPE: median, peerCount: validPEs.length };
+  peerAvgPECache.set(symbol, { ...result, cachedAt: now });
+
+  return result;
+}
+
+/**
+ * Post-processing: Enrich ATH/ATL records with valuation data
+ * This is called after the main scan completes with the smaller result list
+ */
+async function enrichWithValuationData(
+  records: ATHATLRecord[],
+  dateField: "ath_date" | "atl_date"
+): Promise<void> {
+  // Find the latest creation date in this result list
+  const latestDate = getLatestResultDate(records, dateField);
+
+  console.log(`[Valuation] Enriching ${records.length} records`, { dateField, latestDate });
+
+  await Promise.all(
+    records.map(async (record) => {
+      try {
+        // Determine if this record should include peer data (only the latest dates get peer)
+        const includePeerData = latestDate !== null && record[dateField] === latestDate;
+
+        console.log(`[Valuation] ${record.symbol}`, {
+          recordDate: record[dateField],
+          latestDate,
+          includePeerData,
+        });
+
+        const v = await getValuationMetrics(record.symbol, { includePeerData });
+        record.forwardPE = v.forwardPE;
+        record.pegNearTerm = v.pegNearTerm;
+        record.pegLongTerm = v.pegLongTerm;
+        record.nearTermGrowthPct = v.nearTermGrowthPct;
+        record.longTermGrowthPct = v.longTermGrowthPct;
+        record.priceToSales = v.priceToSales;
+        record.priceToBook = v.priceToBook;
+        record.peBookHistoricalPercentile = v.peBookHistoricalPercentile;
+        record.dividendYield = v.dividendYield;
+        record.sectorCategory = v.sectorCategory;
+        record.primaryValuationMetric = v.primaryValuationMetric;
+        record.isProfitable = v.isProfitable;
+        record.sector = v.sector;
+        record.gicsIndustry = v.industry;
+        record.industry = v.industry ?? "";
+        // Non-latest dates don't get peer data - fields remain null/0
+        record.peerAvgForwardPE = v.peerAvgForwardPE;
+        record.peerCount = v.peerCount;
+      } catch (e) {
+        console.error(`[Valuation] Enrichment failed for ${record.symbol}:`, e);
+      }
+    })
+  );
+}
+
+/**
+ * Find the latest result date in the records
+ */
+function getLatestResultDate(records: ATHATLRecord[], dateField: "ath_date" | "atl_date"): string | null {
+  const dates = records
+    .map((record) => record[dateField])
+    .filter((date): date is string => Boolean(date));
+
+  if (dates.length === 0) return null;
+
+  return dates.reduce((latest, date) => (date > latest ? date : latest));
 }
 
 // ============ Stock List Fetching Functions ============
@@ -742,7 +1342,10 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   const now = Date.now();
   
   if (!forceRefresh && cachedData && cachedDataTime && (now - cachedDataTime) < CACHE_TTL_MS) {
-    console.log(`[ATH-ATL] Using cached data (age: ${Math.round((now - cachedDataTime) / 1000)}s)`);
+    console.log("[ATH-ATL] Returning cached scan results", {
+      cacheAgeSeconds: Math.round((now - cachedDataTime) / 1000),
+      cacheTtlSeconds: Math.round(CACHE_TTL_MS / 1000),
+    });
     return cachedData;
   }
   
@@ -780,7 +1383,7 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   console.log(`[ATH-ATL] Starting scan for ${stocksToScan.length} stocks...`);
 
   // 批量處理，每批 50 個 (increased for speed)
-  const batchSize = 25;
+  const batchSize = 50;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[ATH-ATL] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
@@ -812,6 +1415,10 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
   results.ath.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
   results.atl.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
 
+  // Post-processing: enrich with valuation data
+  await enrichWithValuationData(results.ath, "ath_date");
+  await enrichWithValuationData(results.atl, "atl_date");
+
   cachedData = results;
   cachedDataTime = Date.now();
   isScanning = false;
@@ -839,7 +1446,7 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 5);
 
-    // Parallel fetch: chart data and earnings date
+    // Parallel fetch: chart data and earnings date only (valuation done in post-processing)
     const [chart, earningsInfo] = await Promise.all([
       yahooFinance.chart(stock.symbol, {
         period1: startDate,
@@ -898,6 +1505,7 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         symbol: stock.symbol,
         company_name: stock.companyName,
         exchange: stock.exchange,
+        industry: "",  // Will be filled in post-processing
         last_close: latestData.close,
         ath_price: ath,
         ath_date: athDateEntry ? new Date(athDateEntry.date).toISOString().split("T")[0] : null,
@@ -908,12 +1516,30 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         list_type: "ATH",
         next_earnings_date: earningsInfo.date,
         days_to_earnings: earningsInfo.daysUntil,
+        // Valuation fields - will be filled in post-processing
+        forwardPE: null,
+        pegNearTerm: null,
+        pegLongTerm: null,
+        nearTermGrowthPct: null,
+        longTermGrowthPct: null,
+        priceToSales: null,
+        priceToBook: null,
+        peBookHistoricalPercentile: null,
+        dividendYield: null,
+        sectorCategory: "unclassified",
+        primaryValuationMetric: "",
+        isProfitable: null,
+        sector: null,
+        gicsIndustry: null,
+        peerAvgForwardPE: null,
+        peerCount: 0,
       };
     } else {
       return {
         symbol: stock.symbol,
         company_name: stock.companyName,
         exchange: stock.exchange,
+        industry: "",
         last_close: latestData.close,
         ath_price: null,
         ath_date: null,
@@ -924,6 +1550,23 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         list_type: "ATL",
         next_earnings_date: earningsInfo.date,
         days_to_earnings: earningsInfo.daysUntil,
+        // Valuation fields - will be filled in post-processing
+        forwardPE: null,
+        pegNearTerm: null,
+        pegLongTerm: null,
+        nearTermGrowthPct: null,
+        longTermGrowthPct: null,
+        priceToSales: null,
+        priceToBook: null,
+        peBookHistoricalPercentile: null,
+        dividendYield: null,
+        sectorCategory: "unclassified",
+        primaryValuationMetric: "",
+        isProfitable: null,
+        sector: null,
+        gicsIndustry: null,
+        peerAvgForwardPE: null,
+        peerCount: 0,
       };
     }
   } catch (e) {
@@ -972,7 +1615,7 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
   console.log(`[52W] Starting scan for ${stocksToScan.length} stocks...`);
 
   // 批量處理，每批 50 個
-  const batchSize = 25;
+  const batchSize = 50;
   for (let i = 0; i < stocksToScan.length; i += batchSize) {
     const batch = stocksToScan.slice(i, i + batchSize);
     console.log(`[52W] Processing batch ${Math.floor(i / batchSize) + 1}/${Math.ceil(stocksToScan.length / batchSize)}`);
@@ -1004,6 +1647,10 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
   results.ath52w.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
   results.atl52w.sort((a, b) => Math.abs(b.change_pct) - Math.abs(a.change_pct));
 
+  // Post-processing: enrich with valuation data
+  await enrichWithValuationData(results.ath52w, "ath_date");
+  await enrichWithValuationData(results.atl52w, "atl_date");
+
   cached52wData = results;
   cached52wDataTime = Date.now();
   isScanning52w = false;
@@ -1029,7 +1676,7 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
 
-    // Parallel fetch: chart data and earnings date
+    // Parallel fetch: chart data and earnings date only (valuation done in post-processing)
     const [chart, earningsInfo] = await Promise.all([
       yahooFinance.chart(stock.symbol, {
         period1: startDate,
@@ -1092,7 +1739,7 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         symbol: stock.symbol,
         company_name: stock.companyName,
         exchange: stock.exchange,
-        industry: "",
+        industry: "",  // Will be filled in post-processing
         last_close: latestData.close,
         ath_price: high52w,
         ath_date: high52wDateEntry ? new Date(high52wDateEntry.date).toISOString().split("T")[0] : null,
@@ -1103,6 +1750,23 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         list_type: "52W_ATH",
         next_earnings_date: earningsInfo.date,
         days_to_earnings: earningsInfo.daysUntil,
+        // Valuation fields - will be filled in post-processing
+        forwardPE: null,
+        pegNearTerm: null,
+        pegLongTerm: null,
+        nearTermGrowthPct: null,
+        longTermGrowthPct: null,
+        priceToSales: null,
+        priceToBook: null,
+        peBookHistoricalPercentile: null,
+        dividendYield: null,
+        sectorCategory: "unclassified",
+        primaryValuationMetric: "",
+        isProfitable: null,
+        sector: null,
+        gicsIndustry: null,
+        peerAvgForwardPE: null,
+        peerCount: 0,
       };
     } else {
       return {
@@ -1120,6 +1784,23 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         list_type: "52W_ATL",
         next_earnings_date: earningsInfo.date,
         days_to_earnings: earningsInfo.daysUntil,
+        // Valuation fields - will be filled in post-processing
+        forwardPE: null,
+        pegNearTerm: null,
+        pegLongTerm: null,
+        nearTermGrowthPct: null,
+        longTermGrowthPct: null,
+        priceToSales: null,
+        priceToBook: null,
+        peBookHistoricalPercentile: null,
+        dividendYield: null,
+        sectorCategory: "unclassified",
+        primaryValuationMetric: "",
+        isProfitable: null,
+        sector: null,
+        gicsIndustry: null,
+        peerAvgForwardPE: null,
+        peerCount: 0,
       };
     }
   } catch (e) {
