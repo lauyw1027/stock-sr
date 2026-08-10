@@ -7,13 +7,13 @@ import { Link, useLocation } from "wouter";
 import { useHashLocation } from "wouter/use-hash-location";
 
 const NAV_LINKS = [
-  { href: "/", label: "支撐阻力分析" },
-  { href: "/ath-atl", label: "ATH / ATL" },
-  { href: "/divergence", label: "背離掃描" },
-  { href: "/carry-risk", label: "市場風險" },
-  { href: "/credit-monitor", label: "信用風險監控" },
-  { href: "/credit-spread", label: "信用價差" },
-  { href: "/about", label: "關於" },
+  { href: "/", label: "支撐阻力", mobileLabel: "支撐" },
+  { href: "/ath-atl", label: "歷史新高", mobileLabel: "歷史新高" },
+  { href: "/divergence", label: "背離掃描", mobileLabel: "背離" },
+  { href: "/carry-risk", label: "市場風險", mobileLabel: "日圓風險" },
+  { href: "/credit-monitor", label: "信用風險監控", mobileLabel: "信用監控" },
+  { href: "/credit-spread", label: "期權分析", mobileLabel: "期權分析" },
+  { href: "/about", label: "關於", mobileLabel: "關於" },
 ];
 
 function Logo({ className = "", size = 28 }: { className?: string; size?: number }) {
@@ -45,10 +45,10 @@ export function Layout({ children, title, subtitle }: {
     <div className="min-h-screen bg-background text-foreground flex flex-col">
       {/* ── Header ── */}
       <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-6xl px-4 py-3 flex items-center gap-3">
+        <div className="mx-auto max-w-6xl px-2 sm:px-4 py-2 sm:py-3 flex items-center gap-2 sm:gap-3">
           <Link href="/">
             <a className="flex items-center gap-2 shrink-0" aria-label="回到首頁">
-              <Logo />
+              <Logo size={24} />
               <span className="font-bold text-sm hidden sm:block tracking-tight">Stocksr</span>
             </a>
           </Link>
@@ -62,27 +62,37 @@ export function Layout({ children, title, subtitle }: {
           )}
           {!title && <div className="flex-1" />}
 
-          {/* Nav links */}
-          <nav className="flex items-center gap-1 sm:gap-2 flex-wrap justify-end">
-            {NAV_LINKS.map(({ href, label }) => {
+          {/* Nav links - scrollable on mobile */}
+          <nav className="flex items-center gap-0.5 sm:gap-1 lg:gap-2 flex-nowrap overflow-x-auto max-w-[calc(100vw-80px)] sm:max-w-none hide-scrollbar">
+            {NAV_LINKS.map(({ href, label, mobileLabel }) => {
               const active = location === href || (href !== "/" && location.startsWith(href));
               return (
                 <Link key={href} href={href}>
                   <a
                     className={[
-                      "text-xs sm:text-sm px-2 py-1 rounded-md transition-colors whitespace-nowrap",
+                      "flex-shrink-0 text-[10px] sm:text-xs px-1.5 sm:px-2 py-1.5 rounded-md transition-colors whitespace-nowrap",
                       active
                         ? "bg-primary/10 text-primary font-medium"
                         : "text-muted-foreground hover:text-foreground hover:bg-accent",
                     ].join(" ")}
                   >
-                    {label}
+                    <span className="sm:hidden">{mobileLabel}</span>
+                    <span className="hidden sm:inline lg:hidden text-[10px]">{label}</span>
+                    <span className="hidden lg:inline">{label}</span>
                   </a>
                 </Link>
               );
             })}
           </nav>
         </div>
+        
+        {/* Mobile title bar */}
+        {title && (
+          <div className="md:hidden px-2 sm:px-4 pb-2">
+            <p className="text-sm font-semibold truncate">{title}</p>
+            {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}
+          </div>
+        )}
       </header>
 
       {/* ── Page content ── */}
@@ -91,8 +101,8 @@ export function Layout({ children, title, subtitle }: {
       </main>
 
       {/* ── Footer ── */}
-      <footer className="border-t border-border mt-10">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-muted-foreground space-y-1">
+      <footer className="border-t border-border mt-8 sm:mt-10">
+        <div className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 text-xs text-muted-foreground space-y-1">
           <p className="text-center text-muted-foreground">
             © {new Date().getFullYear()} <strong className="text-foreground">Stocksr</strong> — 支撐阻力技術分析工具
           </p>

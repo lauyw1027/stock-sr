@@ -163,17 +163,18 @@ export default function DivergencePage() {
 
   return (
     <Layout title="背離描描" subtitle="Divergence Scanner | MACD/RSI/Volume/OBV/MFI">
-      <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
+      <main className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-4">
         {/* 時間週期切換 */}
-        <Card className="p-4">
+        <Card className="p-3 sm:p-4">
           <div className="flex flex-wrap gap-2 items-center justify-between">
-            <div className="flex gap-2 flex-wrap">
+            <div className="flex gap-1.5 sm:gap-2 flex-wrap">
               {TIMEFRAME_OPTIONS.map((tf) => (
                 <Button
                   key={tf.value}
                   variant={timeframe === tf.value ? "default" : "outline"}
                   size="sm"
                   onClick={() => handleTimeframeChange(tf.value)}
+                  className="min-h-[44px] text-xs sm:text-sm"
                 >
                   {tf.label}
                 </Button>
@@ -181,32 +182,32 @@ export default function DivergencePage() {
             </div>
             <div className="text-xs text-muted-foreground flex items-center gap-1">
               <Info className="h-3 w-3" />
-              {isIntraday ? "單股即時查詢模式" : "全市場掃描模式"}
+              {isIntraday ? "單股即時查詢" : "全市場掃描"}
             </div>
           </div>
         </Card>
 
         {/* 全市場掃描模式 (日線/週線) */}
         {!isIntraday && (
-          <Card className="p-4">
+          <Card className="p-3 sm:p-4">
             <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "bullish" | "bearish")}>
-              <div className="flex flex-wrap gap-3 items-center justify-between mb-4">
+              <div className="flex flex-wrap gap-2 sm:gap-3 items-start sm:items-center justify-between mb-3 sm:mb-4">
                 <TabsList>
-                  <TabsTrigger value="bearish" className="flex items-center gap-1">
-                    <TrendingDown className="h-4 w-4 text-red-500" />
+                  <TabsTrigger value="bearish" className="flex items-center gap-1 text-xs sm:text-sm">
+                    <TrendingDown className="h-3 w-3 sm:h-4 sm:w-4 text-red-500" />
                     頂背離
                   </TabsTrigger>
-                  <TabsTrigger value="bullish" className="flex items-center gap-1">
-                    <TrendingUp className="h-4 w-4 text-green-500" />
+                  <TabsTrigger value="bullish" className="flex items-center gap-1 text-xs sm:text-sm">
+                    <TrendingUp className="h-3 w-3 sm:h-4 sm:w-4 text-green-500" />
                     底背離
                   </TabsTrigger>
                 </TabsList>
 
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                   <select
                     value={exchange}
                     onChange={(e) => setExchange(e.target.value)}
-                    className="px-3 py-1.5 rounded-md border border-border bg-background text-sm"
+                    className="px-3 py-2 rounded-md border border-border bg-background text-sm min-h-[44px] flex-1 sm:flex-none"
                   >
                     <option value="all">全部交易所</option>
                     <option value="NYSE">NYSE</option>
@@ -217,7 +218,7 @@ export default function DivergencePage() {
                   <select
                     value={minStrength}
                     onChange={(e) => setMinStrength(e.target.value as any)}
-                    className="px-3 py-1.5 rounded-md border border-border bg-background text-sm"
+                    className="px-3 py-2 rounded-md border border-border bg-background text-sm min-h-[44px] flex-1 sm:flex-none"
                   >
                     {STRENGTH_OPTIONS.map((opt) => (
                       <option key={opt.value} value={opt.value}>
@@ -231,9 +232,10 @@ export default function DivergencePage() {
                     size="sm"
                     onClick={() => scanMutation.mutate()}
                     disabled={scanMutation.isPending}
+                    className="min-h-[44px] min-w-[44px]"
                   >
-                    <RefreshCw className={`h-4 w-4 mr-1 ${scanMutation.isPending ? "animate-spin" : ""}`} />
-                    重新整理
+                    <RefreshCw className={`h-4 w-4 ${scanMutation.isPending ? "animate-spin" : ""}`} />
+                    <span className="ml-1 hidden sm:inline">重新整理</span>
                   </Button>
                 </div>
               </div>
@@ -284,8 +286,9 @@ export default function DivergencePage() {
                     <p className="text-xs text-muted-foreground mb-3">
                       找到 {filteredResults.length} 個訊號 | 資料更新：{scanMutation.data?.lastUpdated ? new Date(scanMutation.data.lastUpdated).toLocaleString("zh-TW") : "N/A"}
                     </p>
-                    <div className="overflow-x-auto">
-                      <Table>
+                    {/* 桌面版：表格 */}
+                    <div className="hidden sm:block overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                      <Table className="min-w-[600px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead>代碼</TableHead>
@@ -329,6 +332,42 @@ export default function DivergencePage() {
                         </TableBody>
                       </Table>
                     </div>
+                    {/* 手機版：卡片列表 */}
+                    <div className="sm:hidden space-y-2">
+                      {filteredResults.map((record) => (
+                        <Card key={record.symbol} className={`p-3 ${record.divergence_type === "bearish" ? "bg-red-500/5" : "bg-green-500/5"}`}>
+                          <div className="flex justify-between items-start mb-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="font-mono font-semibold text-base">{record.symbol}</div>
+                              <div className="text-sm text-muted-foreground truncate">{record.company_name}</div>
+                            </div>
+                            <Badge variant="outline" className="ml-2 shrink-0 text-xs">{record.exchange}</Badge>
+                          </div>
+                          <div className="grid grid-cols-2 gap-2 text-sm mb-2">
+                            <div>
+                              <div className="text-muted-foreground text-xs">強度</div>
+                              {renderStrengthBadge(record.strength)}
+                            </div>
+                            <div>
+                              <div className="text-muted-foreground text-xs">最新價</div>
+                              <div className="font-mono">{formatPrice(record.last_close)}</div>
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-muted-foreground text-xs">命中指標</div>
+                              {renderIndicatorBadges(record.matched_indicators)}
+                            </div>
+                            <div className="col-span-2">
+                              <div className="text-muted-foreground text-xs">擺動點</div>
+                              <div className="text-xs">
+                                {formatPrice(record.swing_price_1)} → {formatPrice(record.swing_price_2)}
+                                <br />
+                                {formatDate(record.swing_date_1)} ~ {formatDate(record.swing_date_2)}
+                              </div>
+                            </div>
+                          </div>
+                        </Card>
+                      ))}
+                    </div>
                   </>
                 )}
               </TabsContent>
@@ -338,9 +377,9 @@ export default function DivergencePage() {
 
         {/* 單股查詢模式 (30分鐘/1小時) */}
         {isIntraday && (
-          <Card className="p-4">
-            <div className="flex flex-wrap gap-3 items-end">
-              <div className="flex-1 min-w-[200px] space-y-1.5">
+          <Card className="p-3 sm:p-4">
+            <div className="flex flex-col gap-3">
+              <div className="flex-1 min-w-[180px] space-y-1.5">
                 <Label htmlFor="symbol-input" className="text-xs">股票代號</Label>
                 <div className="flex gap-2">
                   <Input
@@ -349,14 +388,16 @@ export default function DivergencePage() {
                     value={symbolInput}
                     onChange={(e) => setSymbolInput(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleSymbolSearch()}
-                    className="font-mono"
+                    className="font-mono min-h-[44px]"
                   />
                   <Button
                     onClick={handleSymbolSearch}
                     disabled={symbolMutation.isPending || !symbolInput.trim()}
+                    className="min-h-[44px] min-w-[80px]"
                   >
-                    <Search className="mr-2 h-4 w-4" />
-                    {symbolMutation.isPending ? "查詢中..." : "查詢"}
+                    <Search className="mr-1 sm:mr-2 h-4 w-4" />
+                    <span className="hidden sm:inline">{symbolMutation.isPending ? "查詢中..." : "查詢"}</span>
+                    <span className="sm:hidden">{symbolMutation.isPending ? "..." : "查詢"}</span>
                   </Button>
                 </div>
               </div>

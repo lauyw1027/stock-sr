@@ -41,7 +41,7 @@ function RiskScoreDisplay({
   const color = RISK_COLORS[level];
   
   return (
-    <div className="relative w-32 h-32">
+    <div className="relative w-24 h-24 sm:w-32 sm:h-32">
       <svg className="w-full h-full transform -rotate-90" viewBox="0 0 100 100">
         {/* 背景圓環 */}
         <circle
@@ -67,7 +67,7 @@ function RiskScoreDisplay({
         />
       </svg>
       <div className="absolute inset-0 flex flex-col items-center justify-center">
-        <span className="text-3xl font-bold" style={{ color }}>
+        <span className="text-2xl sm:text-3xl font-bold" style={{ color }}>
           {score}
         </span>
         <span className="text-xs text-muted-foreground">/100</span>
@@ -203,15 +203,15 @@ export default function CarryTradeRiskPage() {
         {/* 風險總分顯示 */}
         {score && (
           <Card className="overflow-hidden">
-            <div className="p-6" style={{ backgroundColor: bgColor }}>
-              <div className="flex items-center justify-between flex-wrap gap-4">
-                <div className="flex items-center gap-6">
+            <div className="p-4 sm:p-6" style={{ backgroundColor: bgColor }}>
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div className="flex flex-col sm:flex-row items-center gap-4 sm:gap-6">
                   <RiskScoreDisplay score={score.total} level={level} />
                   <div>
                     <div className="text-sm text-muted-foreground">風險等級</div>
                     <div className="flex items-center gap-2 mt-1">
                       <AlertTriangle className="w-5 h-5" style={{ color }} />
-                      <span className="text-2xl font-bold" style={{ color }}>
+                      <span className="text-xl sm:text-2xl font-bold" style={{ color }}>
                         {level}
                       </span>
                     </div>
@@ -222,19 +222,19 @@ export default function CarryTradeRiskPage() {
                     </div>
                   </div>
                 </div>
-                <div className="flex gap-6 text-sm">
+                <div className="flex justify-around sm:flex gap-4 sm:gap-6 text-sm">
                   <div className="text-center">
-                    <div className="text-muted-foreground">USD/JPY 速度</div>
+                    <div className="text-muted-foreground text-xs sm:text-sm">USD/JPY 速度</div>
                     <div className="font-bold">{score.usdjpySpeed.toFixed(1)}</div>
                     <div className="text-xs text-muted-foreground">/40</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-muted-foreground">VIX 水平</div>
+                    <div className="text-muted-foreground text-xs sm:text-sm">VIX 水平</div>
                     <div className="font-bold">{score.vixLevel.toFixed(1)}</div>
                     <div className="text-xs text-muted-foreground">/30</div>
                   </div>
                   <div className="text-center">
-                    <div className="text-muted-foreground">CFTC 倉位</div>
+                    <div className="text-muted-foreground text-xs sm:text-sm">CFTC 倉位</div>
                     <div className="font-bold">{score.cftcPositioning.toFixed(1)}</div>
                     <div className="text-xs text-muted-foreground">/30</div>
                   </div>

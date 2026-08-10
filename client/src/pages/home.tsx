@@ -2,6 +2,7 @@ import { useState, useMemo } from "react";
 import { Link } from "wouter";
 import { useMutation } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
+import { Layout } from "@/components/Layout";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -112,58 +113,8 @@ export default function Home() {
   };
 
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      {/* Header */}
-      <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center gap-3">
-          <Logo />
-          <div className="flex-1">
-            <h1 className="text-lg font-semibold tracking-tight" data-testid="text-app-title">
-              支撐阻力技術分析
-            </h1>
-            <p className="text-xs text-muted-foreground">
-              Yahoo Finance 日線 OHLCV · 多方法共振 · 教育用途
-            </p>
-          </div>
-          <Link href="/about">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              關於
-            </a>
-          </Link>
-          <Link href="/ath-atl">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              ATH/ATL
-            </a>
-          </Link>
-          <Link href="/divergence">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              背離掃描
-            </a>
-          </Link>
-          <Link href="/credit-monitor">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              信用風險監控
-            </a>
-          </Link>
-          <Link href="/carry-risk">
-            <a className="text-sm text-muted-foreground hover:text-foreground transition-colors">
-              市場風險
-            </a>
-          </Link>
-        </div>
-      </header>
-
-      {/* Google AdSense */}
-      <div className=" py-2 text-center">
-        <ins className="adsbygoogle"
-          style={{ display: 'block', minHeight: '90px' }}
-          data-ad-client="ca-pub-5616423133058703"
-          data-ad-slot="1234567890"
-          data-ad-format="horizontal"
-          data-full-width-responsive="true"></ins>
-      </div>
-
-      <main className="mx-auto max-w-6xl px-4 py-6 space-y-6">
+    <Layout title="支撐阻力分析" subtitle="Yahoo Finance 日線 OHLCV · 多方法共振 · 教育用途">
+      <main className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
         {/* 輸入區 */}
         <Card className="p-5">
           <div className="grid gap-4 md:grid-cols-[1fr_1.2fr_auto] md:items-end">
@@ -288,20 +239,7 @@ export default function Home() {
 
         {!result && !mutation.isPending && !ambiguous && !errorInfo && <EmptyState />}
       </main>
-
-      <footer className="border-t border-border mt-10">
-        <div className="mx-auto max-w-6xl px-4 py-6 text-xs text-muted-foreground space-y-1">
-          <p className="text-center text-muted-foreground">
-            © {new Date().getFullYear()} <strong className="text-foreground">Stocksr</strong> — 支撐阻力技術分析工具
-          </p>
-          <p>
-            <strong className="text-foreground">風險聲明：</strong>
-            本工具僅為技術分析與教育用途，非投資建議。資料來源 Yahoo Finance，可能有延遲或誤差。
-          </p>
-          <p>目前價格採用最後收盤價（非即時報價）。所有指標由 OHLCV 計算，若資料不足則顯示 N/A。</p>
-        </div>
-      </footer>
-    </div>
+    </Layout>
   );
 }
 

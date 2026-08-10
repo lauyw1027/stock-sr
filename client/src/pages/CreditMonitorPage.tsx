@@ -165,67 +165,125 @@ function DataTable({ data }: { data: CreditMonitorRecord[] }) {
   }
 
   return (
-    <div className="rounded-md border">
-      <table className="w-full text-sm">
-        <thead className="bg-muted/50">
-          <tr>
-            <th className="px-3 py-2 text-left font-medium">日期</th>
-            <th className="px-3 py-2 text-left font-medium">季度</th>
-            <th className="px-3 py-2 text-center font-medium">信用市場</th>
-            <th className="px-3 py-2 text-center font-medium">流動性/壓力</th>
-            <th className="px-3 py-2 text-center font-medium">AI基建核心</th>
-            <th className="px-3 py-2 text-center font-medium">上游供應鏈</th>
-            <th className="px-3 py-2 text-center font-medium">資金供給端</th>
-            <th className="px-3 py-2 text-center font-medium">加權總分</th>
-            <th className="px-3 py-2 text-center font-medium">燈號</th>
-          </tr>
-        </thead>
-        <tbody>
-          {data.map((record, idx) => (
-            <tr key={idx} className="border-t">
-              <td className="px-3 py-2">{record.日期}</td>
-              <td className="px-3 py-2">{record.季度}</td>
-              <td className="px-3 py-2 text-center">
-                <span style={{ color: SIGNAL_COLORS[record.sectorScores.creditMarket.signal] }}>
-                  {record.sectorScores.creditMarket.score}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-center">
-                <span style={{ color: SIGNAL_COLORS[record.sectorScores.liquidityStress.signal] }}>
-                  {record.sectorScores.liquidityStress.score}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-center">
-                <span style={{ color: SIGNAL_COLORS[record.sectorScores.aiInfraCore.signal] }}>
-                  {record.sectorScores.aiInfraCore.score}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-center">
-                <span style={{ color: SIGNAL_COLORS[record.sectorScores.chipSupplyChain.signal] }}>
-                  {record.sectorScores.chipSupplyChain.score}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-center">
-                <span style={{ color: SIGNAL_COLORS[record.sectorScores.privateCreditFunding.signal] }}>
-                  {record.sectorScores.privateCreditFunding.score}
-                </span>
-              </td>
-              <td className="px-3 py-2 text-center font-medium">
-                {record.weightedTotal}
-              </td>
-              <td className="px-3 py-2 text-center">
-                <div className="flex items-center justify-center gap-1.5">
-                  <SignalIndicator signal={record.finalSignal} size="sm" />
-                  <span style={{ color: SIGNAL_COLORS[record.finalSignal] }}>
-                    {record.finalSignal}
-                  </span>
-                </div>
-              </td>
+    <>
+      {/* 桌面版：表格 */}
+      <div className="hidden md:block rounded-md border overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead className="bg-muted/50">
+            <tr>
+              <th className="px-3 py-2 text-left font-medium">日期</th>
+              <th className="px-3 py-2 text-left font-medium">季度</th>
+              <th className="px-3 py-2 text-center font-medium">信用市場</th>
+              <th className="px-3 py-2 text-center font-medium">流動性/壓力</th>
+              <th className="px-3 py-2 text-center font-medium">AI基建核心</th>
+              <th className="px-3 py-2 text-center font-medium">上游供應鏈</th>
+              <th className="px-3 py-2 text-center font-medium">資金供給端</th>
+              <th className="px-3 py-2 text-center font-medium">加權總分</th>
+              <th className="px-3 py-2 text-center font-medium">燈號</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {data.map((record, idx) => (
+              <tr key={idx} className="border-t">
+                <td className="px-3 py-2">{record.日期}</td>
+                <td className="px-3 py-2">{record.季度}</td>
+                <td className="px-3 py-2 text-center">
+                  <span style={{ color: SIGNAL_COLORS[record.sectorScores.creditMarket.signal] }}>
+                    {record.sectorScores.creditMarket.score}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <span style={{ color: SIGNAL_COLORS[record.sectorScores.liquidityStress.signal] }}>
+                    {record.sectorScores.liquidityStress.score}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <span style={{ color: SIGNAL_COLORS[record.sectorScores.aiInfraCore.signal] }}>
+                    {record.sectorScores.aiInfraCore.score}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <span style={{ color: SIGNAL_COLORS[record.sectorScores.chipSupplyChain.signal] }}>
+                    {record.sectorScores.chipSupplyChain.score}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <span style={{ color: SIGNAL_COLORS[record.sectorScores.privateCreditFunding.signal] }}>
+                    {record.sectorScores.privateCreditFunding.score}
+                  </span>
+                </td>
+                <td className="px-3 py-2 text-center font-medium">
+                  {record.weightedTotal}
+                </td>
+                <td className="px-3 py-2 text-center">
+                  <div className="flex items-center justify-center gap-1.5">
+                    <SignalIndicator signal={record.finalSignal} size="sm" />
+                    <span style={{ color: SIGNAL_COLORS[record.finalSignal] }}>
+                      {record.finalSignal}
+                    </span>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {/* 手機版：卡片列表 */}
+      <div className="md:hidden space-y-3">
+        {data.map((record, idx) => (
+          <Card key={idx} className="p-3">
+            <div className="flex justify-between items-start mb-2">
+              <div>
+                <div className="font-medium">{record.日期}</div>
+                <div className="text-sm text-muted-foreground">{record.季度}</div>
+              </div>
+              <div className="flex items-center gap-2">
+                <SignalIndicator signal={record.finalSignal} size="md" />
+                <span style={{ color: SIGNAL_COLORS[record.finalSignal] }} className="font-medium">
+                  {record.finalSignal}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <div className="text-xs text-muted-foreground">加權總分</div>
+                <div className="font-bold text-lg">{record.weightedTotal}</div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">信用市場</div>
+                <div style={{ color: SIGNAL_COLORS[record.sectorScores.creditMarket.signal] }}>
+                  {record.sectorScores.creditMarket.score}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">流動性/壓力</div>
+                <div style={{ color: SIGNAL_COLORS[record.sectorScores.liquidityStress.signal] }}>
+                  {record.sectorScores.liquidityStress.score}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">AI基建核心</div>
+                <div style={{ color: SIGNAL_COLORS[record.sectorScores.aiInfraCore.signal] }}>
+                  {record.sectorScores.aiInfraCore.score}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">上游供應鏈</div>
+                <div style={{ color: SIGNAL_COLORS[record.sectorScores.chipSupplyChain.signal] }}>
+                  {record.sectorScores.chipSupplyChain.score}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">資金供給端</div>
+                <div style={{ color: SIGNAL_COLORS[record.sectorScores.privateCreditFunding.signal] }}>
+                  {record.sectorScores.privateCreditFunding.score}
+                </div>
+              </div>
+            </div>
+          </Card>
+        ))}
+      </div>
+    </>
   );
 }
 
@@ -303,16 +361,16 @@ export default function CreditMonitorPage() {
         {latest && (
           <Card className="overflow-hidden">
             <div
-              className="p-6"
+              className="p-4 sm:p-6"
               style={{ backgroundColor: SIGNAL_BG_COLORS[latest.finalSignal] }}
             >
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
                   <div className="text-sm text-muted-foreground">今日風險狀態</div>
                   <div className="flex items-center gap-3 mt-2">
                     <SignalIndicator signal={latest.finalSignal} size="lg" />
                     <span
-                      className="text-3xl font-bold"
+                      className="text-2xl sm:text-3xl font-bold"
                       style={{ color: SIGNAL_COLORS[latest.finalSignal] }}
                     >
                       {latest.finalSignal}
@@ -322,7 +380,7 @@ export default function CreditMonitorPage() {
                 <div className="text-right">
                   <div className="text-sm text-muted-foreground">加權總分</div>
                   <div
-                    className="text-4xl font-bold"
+                    className="text-3xl sm:text-4xl font-bold"
                     style={{ color: SIGNAL_COLORS[latest.finalSignal] }}
                   >
                     {latest.weightedTotal}

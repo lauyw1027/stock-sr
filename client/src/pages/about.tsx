@@ -1,23 +1,16 @@
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 
+import { Card } from "@/components/ui/card";
+import { Layout } from "@/components/Layout";
+
 export default function About() {
   return (
-    <div className="min-h-screen bg-background text-foreground">
-      <header className="border-b border-border bg-card/40 backdrop-blur sticky top-0 z-20">
-        <div className="mx-auto max-w-6xl px-4 py-4 flex items-center gap-3">
-          <Logo />
-          <div>
-            <h1 className="text-lg font-semibold tracking-tight">關於 Stocksr</h1>
-            <p className="text-xs text-muted-foreground">支撐阻力技術分析工具</p>
-          </div>
-        </div>
-      </header>
-
-      <main className="mx-auto max-w-4xl px-4 py-8 space-y-6">
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">關於 Stocksr</h2>
-          <div className="prose prose-sm max-w-none text-muted-foreground space-y-4">
+    <Layout>
+      <main className="mx-auto max-w-4xl px-2 sm:px-4 py-6 sm:py-8 space-y-4 sm:space-y-6">
+        <Card className="p-4 sm:p-6">
+          <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">關於 Stocksr</h2>
+          <div className="prose prose-sm max-w-none text-muted-foreground space-y-3 sm:space-y-4 text-sm">
             <p>
               <strong>Stocksr</strong> 是一款專業的支撐阻力技術分析工具，幫助投資者找出股票走勢中的關鍵價位。
             </p>
@@ -39,40 +32,36 @@ export default function About() {
           </div>
         </Card>
 
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">常見問題</h2>
-          <div className="space-y-4">
+        <Card className="p-4 sm:p-6">
+          <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">常見問題</h2>
+          <div className="space-y-3 sm:space-y-4">
             <div>
-              <h3 className="font-medium mb-1">Q: 這個工具收費嗎？</h3>
+              <h3 className="font-medium mb-1 text-sm">Q: 這個工具收費嗎？</h3>
               <p className="text-sm text-muted-foreground">A: Stocksr 完全免費使用，仅供教育与投资参考目的。</p>
             </div>
             <div>
-              <h3 className="font-medium mb-1">Q: 資料是即時的嗎？</h3>
+              <h3 className="font-medium mb-1 text-sm">Q: 資料是即時的嗎？</h3>
               <p className="text-sm text-muted-foreground">A: 否，目前價格採用最後收盤價，並非即時報價。</p>
             </div>
             <div>
-              <h3 className="font-medium mb-1">Q: 支持哪些市場？</h3>
+              <h3 className="font-medium mb-1 text-sm">Q: 支持哪些市場？</h3>
               <p className="text-sm text-muted-foreground">A: 支持美國、香港、台灣、上海、深圳、日本、韓國、倫敦等主要交易所。</p>
             </div>
             <div>
-              <h3 className="font-medium mb-1">Q: 分析結果準確嗎？</h3>
+              <h3 className="font-medium mb-1 text-sm">Q: 分析結果準確嗎？</h3>
               <p className="text-sm text-muted-foreground">A: 技術分析僅供參考，過往表現不代表未來結果。請自行判斷並承擔投資風險。</p>
             </div>
           </div>
         </Card>
 
-        <Card className="p-6">
-          <h2 className="text-xl font-semibold mb-4">聯絡我們</h2>
+        <Card className="p-4 sm:p-6">
+          <h2 className="text-lg sm:text-xl font-semibold mb-3 sm:mb-4">聯絡我們</h2>
           <p className="text-sm text-muted-foreground">
             如有問題或建議，歡迎透過 GitHub 或其他管道聯繫。
           </p>
         </Card>
-
-        <div className="text-center text-sm text-muted-foreground">
-          <p>© {new Date().getFullYear()} Stocksr — 支撐阻力技術分析工具</p>
-        </div>
       </main>
-    </div>
+    </Layout>
   );
 }
 

@@ -29,6 +29,7 @@ import {
   Volume2,
   Calendar,
   Clock,
+  Info,
 } from "lucide-react";
 
 // Dynamic import for nyse-holidays (client-side)
@@ -158,6 +159,7 @@ export default function ATHATLPage() {
   const [activeTab, setActiveTab] = useState<TabType>("ath");
   const [search, setSearch] = useState("");
   const [exchange, setExchange] = useState<string>("all");
+  const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
   const getDefaultSortField = (tab: TabType): SortField => {
     if (tab === "ath" || tab === "52w_ath") return "ath_date";
     return "atl_date";
@@ -165,6 +167,18 @@ export default function ATHATLPage() {
   
   const [sortOrder, setSortOrder] = useState<SortOrder>("desc");
   const [sortField, setSortField] = useState<SortField>("ath_date");
+
+  const toggleCardExpand = (symbol: string) => {
+    setExpandedCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(symbol)) {
+        next.delete(symbol);
+      } else {
+        next.add(symbol);
+      }
+      return next;
+    });
+  };
   
   // 根據 activeTab 初始排序欄位
   useEffect(() => {
@@ -385,103 +399,152 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
     return colors[ex] || "";
   };
 
+  // 追蹤當前展開的說明框（確保同卡片同時只展開一個）
+  const [infoExpanded, setInfoExpanded] = useState<string | null>(null);
+
+  // Metric with clickable info icon for mobile
+  function MetricWithInfo({
+    label,
+    value,
+    explanation,
+    metricKey,
+  }: {
+    label: string;
+    value: React.ReactNode;
+    explanation: string;
+    metricKey: string;
+  }) {
+    const isExpanded = infoExpanded === metricKey;
+    
+    return (
+      <div className="relative">
+        <div className="flex items-center gap-1">
+          <span className="text-muted-foreground text-xs">{label}</span>
+          <button
+            type="button"
+            onClick={() => setInfoExpanded(isExpanded ? null : metricKey)}
+            className="text-muted-foreground/60 active:text-muted-foreground p-0.5"
+            aria-label={`${label}說明`}
+          >
+            <Info className="w-3 h-3" />
+          </button>
+        </div>
+        <div className="font-mono text-sm">{value}</div>
+        {isExpanded && (
+          <div className="absolute z-20 top-full left-0 mt-1 w-56 max-w-[calc(100vw-2rem)] p-2 rounded-md bg-popover border border-border text-xs text-muted-foreground shadow-lg">
+            {explanation}
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <Layout title="ATH / ATL Scanner" subtitle="歷史新高/新低 | All-Time High & Low">
-      <main className="mx-auto max-w-6xl px-4 py-6 space-y-4">
+      <main className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-4">
         {/* 控制區 */}
-        <Card className="p-4">
-          <div className="flex flex-col sm:flex-row flex-wrap gap-3 items-start sm:items-center justify-between">
-            {/* Tab 切換 */}
-            <div className="flex flex-wrap gap-2 w-full sm:w-auto">
+        <Card className="p-3 sm:p-4">
+          <div className="flex flex-col gap-3">
+            {/* Tab 切換 - 手機版 2x2 網格，桌面版橫向排列 */}
+            <div className="grid grid-cols-2 gap-2 sm:flex sm:gap-2 w-full">
               <Button
                 variant={activeTab === "ath" ? "default" : "outline"}
                 onClick={() => setActiveTab("ath")}
-                className={activeTab === "ath" ? "bg-green-600 hover:bg-green-700" : ""}
+                className={`flex-1 min-h-[44px] text-xs sm:text-sm ${activeTab === "ath" ? "bg-green-600 hover:bg-green-700" : ""}`}
               >
-                <TrendingUp className="w-4 h-4 mr-1" />
-                ATH (歷史新高)
+                <TrendingUp className="w-4 h-4 mr-1 flex-shrink-0" />
+                <span className="truncate">ATH</span>
               </Button>
               <Button
                 variant={activeTab === "atl" ? "default" : "outline"}
                 onClick={() => setActiveTab("atl")}
-                className={activeTab === "atl" ? "bg-red-600 hover:bg-red-700" : ""}
+                className={`flex-1 min-h-[44px] text-xs sm:text-sm ${activeTab === "atl" ? "bg-red-600 hover:bg-red-700" : ""}`}
               >
-                <TrendingDown className="w-4 h-4 mr-1" />
-                ATL (歷史新低)
+                <TrendingDown className="w-4 h-4 mr-1 flex-shrink-0" />
+                <span className="truncate">ATL</span>
               </Button>
               <Button
                 variant={activeTab === "52w_ath" ? "default" : "outline"}
                 onClick={() => setActiveTab("52w_ath")}
-                className={activeTab === "52w_ath" ? "bg-green-600 hover:bg-green-700" : ""}
+                className={`flex-1 min-h-[44px] text-xs sm:text-sm ${activeTab === "52w_ath" ? "bg-green-600 hover:bg-green-700" : ""}`}
               >
-                <TrendingUp className="w-4 h-4 mr-1" />
-                52週新高
+                <TrendingUp className="w-4 h-4 mr-1 flex-shrink-0" />
+                <span className="hidden sm:inline">52週新高</span>
+                <span className="sm:hidden">52W新高</span>
               </Button>
               <Button
                 variant={activeTab === "52w_atl" ? "default" : "outline"}
                 onClick={() => setActiveTab("52w_atl")}
-                className={activeTab === "52w_atl" ? "bg-red-600 hover:bg-red-700" : ""}
+                className={`flex-1 min-h-[44px] text-xs sm:text-sm ${activeTab === "52w_atl" ? "bg-red-600 hover:bg-red-700" : ""}`}
               >
-                <TrendingDown className="w-4 h-4 mr-1" />
-                52週新低
+                <TrendingDown className="w-4 h-4 mr-1 flex-shrink-0" />
+                <span className="hidden sm:inline">52週新低</span>
+                <span className="sm:hidden">52W新低</span>
               </Button>
             </div>
 
-            {/* 交易所篩選 */}
-            <select
-              value={exchange}
-              onChange={(e) => setExchange(e.target.value)}
-              className="px-3 py-2 rounded-md border border-border bg-background text-sm"
-            >
-              <option value="all">全部交易所</option>
-              <option value="NYSE">NYSE</option>
-              <option value="NASDAQ">NASDAQ</option>
-              <option value="AMEX">AMEX</option>
-            </select>
+            {/* 交易所篩選 + 重新整理按鈕 */}
+            <div className="flex flex-wrap gap-2 items-center">
+              <select
+                value={exchange}
+                onChange={(e) => setExchange(e.target.value)}
+                className="px-3 py-2 rounded-md border border-border bg-background text-sm min-h-[44px] flex-1 sm:flex-none sm:min-w-[140px]"
+              >
+                <option value="all">全部交易所</option>
+                <option value="NYSE">NYSE</option>
+                <option value="NASDAQ">NASDAQ</option>
+                <option value="AMEX">AMEX</option>
+              </select>
+              <Button
+                variant="outline"
+                onClick={() => mutation.mutate()}
+                disabled={mutation.isPending}
+                className="min-h-[44px] min-w-[44px]"
+              >
+                <RefreshCw className={`w-4 h-4 ${mutation.isPending ? "animate-spin" : ""}`} />
+                <span className="ml-1 hidden sm:inline">重新整理</span>
+              </Button>
+            </div>
           </div>
 
           {/* 搜尋與排序 */}
-          <div className="flex flex-wrap gap-3 mt-4">
-            <div className="relative flex-1 min-w-[200px]">
+          <div className="flex flex-col sm:flex-row gap-2 sm:gap-3 mt-3 sm:mt-4">
+            <div className="relative flex-1 min-w-[180px]">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
               <Input
                 placeholder="搜尋代碼或公司名稱..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
-                className="pl-9"
+                className="pl-9 min-h-[44px]"
               />
             </div>
-            <Button
-              variant="outline"
-              onClick={() => mutation.mutate()}
-              disabled={mutation.isPending}
-            >
-              <RefreshCw className={`w-4 h-4 mr-1 ${mutation.isPending ? "animate-spin" : ""}`} />
-              重新整理
-            </Button>
           </div>
 
-          {/* 排序按鈕 */}
-          <div className="flex flex-wrap gap-2 mt-3">
-            <Button variant="ghost" size="sm" onClick={() => handleSort("change_pct")}>
+          {/* 排序按鈕 - 手機版換行 */}
+          <div className="flex flex-wrap gap-1.5 sm:gap-2 mt-3">
+            <Button variant="ghost" size="sm" onClick={() => handleSort("change_pct")} className="min-h-[44px] px-2 sm:px-3 text-xs">
               <ArrowUpDown className="w-3 h-3 mr-1" />
               漲跌幅 {sortField === "change_pct" && (sortOrder === "desc" ? "↓" : "↑")}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => handleSort("volume")}>
+            <Button variant="ghost" size="sm" onClick={() => handleSort("volume")} className="min-h-[44px] px-2 sm:px-3 text-xs">
               <Volume2 className="w-3 h-3 mr-1" />
-              成交量 {sortField === "volume" && (sortOrder === "desc" ? "↓" : "↑")}
+              <span className="hidden sm:inline">成交量</span>
+              <span className="sm:hidden">量</span>
+              {sortField === "volume" && (sortOrder === "desc" ? "↓" : "↑")}
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => handleSort(activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date")}>
+            <Button variant="ghost" size="sm" onClick={() => handleSort(activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date")} className="min-h-[44px] px-2 sm:px-3 text-xs">
               <Calendar className="w-3 h-3 mr-1" />
-              日期 {sortField === (activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date") && (sortOrder === "desc" ? "↓" : "↑")}
+              <span className="hidden sm:inline">日期</span>
+              <span className="sm:hidden">日</span>
+              {sortField === (activeTab === "ath" || activeTab === "52w_ath" ? "ath_date" : "atl_date") && (sortOrder === "desc" ? "↓" : "↑")}
             </Button>
           </div>
 
           {/* 資料更新時間 */}
           {(activeTab === "ath" || activeTab === "atl" ? data?.lastUpdated : data?.lastUpdated52w) && (
-            <div className="flex items-center gap-2 mt-3">
+            <div className="flex flex-wrap items-center gap-2 mt-3">
               {isMarketHours && isTodayTradeDay && (
-                <Badge variant="outline" className="bg-amber-500/20 text-amber-500 border-amber-500/40">
+                <Badge variant="outline" className="bg-amber-500/20 text-amber-500 border-amber-500/40 text-xs">
                   <Clock className="w-3 h-3 mr-1" />
                   盤中即時
                 </Badge>
@@ -521,23 +584,23 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                 </p>
               </Card>
             ) : (
-              <div className="space-y-6">
+              <div className="space-y-4 sm:space-y-6">
                 {groupedRecords.map(({ category, label, records }) => (
                   <div key={category} className="space-y-2">
                     {/* Category Header */}
-                    <div className="flex items-center gap-2 sticky top-0 bg-background/95 backdrop-blur-sm py-2 z-10 border-b border-border">
+                    <div className="flex flex-wrap items-center gap-2 sticky top-0 bg-background/95 backdrop-blur-sm py-2 z-10 border-b border-border">
                       <h3 className={`text-sm font-semibold ${getSectorCategoryDisplay(category).color}`}>
                         {label}
                       </h3>
                       <Badge variant="outline" className="text-xs">{records.length} 檔</Badge>
-                      <span className="text-xs text-muted-foreground">
+                      <span className="text-xs text-muted-foreground hidden sm:inline">
                         主要指標：{records[0]?.primaryValuationMetric}
                       </span>
                     </div>
 
-                    {/* Table for this category */}
-                    <div className="overflow-x-auto">
-                      <Table>
+                    {/* 桌面版：表格 */}
+                    <div className="hidden sm:block overflow-x-auto -mx-4 px-4 sm:mx-0 sm:px-0">
+                      <Table className="min-w-[800px]">
                         <TableHeader>
                           <TableRow>
                             <TableHead className="py-2">代碼</TableHead>
@@ -724,6 +787,118 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                           ))}
                         </TableBody>
                       </Table>
+                    </div>
+
+                    {/* 手機版：卡片列表 */}
+                    <div className="sm:hidden space-y-2">
+                      {records.map((record) => {
+                        return (
+                          <Card key={record.symbol} className={`p-3 ${activeTab === "ath" ? "bg-green-500/5" : "bg-red-500/5"}`}>
+                            {/* 卡片主要内容 - 始終顯示 */}
+                            <div className="flex justify-between items-start mb-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="font-mono font-semibold text-base">{record.symbol}</div>
+                                <div className="text-sm text-muted-foreground truncate">{record.company_name}</div>
+                              </div>
+                              <Badge variant="outline" className={`ml-2 shrink-0 text-xs ${getExchangeBadge(record.exchange)}`}>
+                                {record.exchange}
+                              </Badge>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm mb-2">
+                              <div>
+                                <div className="text-muted-foreground text-xs">價格</div>
+                                <div className="font-mono">{formatPrice(record.last_close)}</div>
+                              </div>
+                              <div>
+                                <div className="text-muted-foreground text-xs">
+                                  {activeTab === "ath" || activeTab === "52w_ath" ? "歷史新高" : "歷史新低"}
+                                </div>
+                                <div className="font-mono">
+                                  {(activeTab === "ath" || activeTab === "52w_ath")
+                                    ? formatPrice(record.ath_price || 0)
+                                    : formatPrice(record.atl_price || 0)}
+                                </div>
+                              </div>
+                              <MetricWithInfo
+                                label="Forward P/E"
+                                value={record.forwardPE !== null ? formatValuation(record.forwardPE) : "N/A"}
+                                explanation="股價 ÷ 未來12個月預估每股盈餘。數字愈低代表用愈少的價格買到相同的預期盈餘，但需搭配同業比較，不同產業合理區間差異很大。"
+                                metricKey={`${record.symbol}-fwdpe`}
+                              />
+                              {shouldShowPEG(record.sectorCategory) ? (
+                                <MetricWithInfo
+                                  label="PEG"
+                                  value={record.pegNearTerm !== null ? formatValuation(record.pegNearTerm) : "N/A"}
+                                  explanation="股價 ÷ 預估成長率。1.0-2.0較為合理，>2.5相對昂貴，<1.0相對便宜。"
+                                  metricKey={`${record.symbol}-peg`}
+                                />
+                              ) : (
+                                <MetricWithInfo
+                                  label="PEG"
+                                  value={<span className="text-muted-foreground">{getPEGDisplayNote(record.sectorCategory) ?? "N/A"}</span>}
+                                  explanation={getPEGDisplayNote(record.sectorCategory) ?? "此類型不適用"}
+                                  metricKey={`${record.symbol}-peg`}
+                                />
+                              )}
+                              <MetricWithInfo
+                                label="P/S"
+                                value={record.priceToSales !== null ? formatValuation(record.priceToSales) : "N/A"}
+                                explanation="股價 ÷ 每股營收(過去12個月)。常用於還未盈利或成長期公司，數字愈低代表相對營收付出的價格愈低。"
+                                metricKey={`${record.symbol}-ps`}
+                              />
+                              <MetricWithInfo
+                                label="P/B"
+                                value={record.priceToBook !== null ? formatValuation(record.priceToBook) : "N/A"}
+                                explanation="股價 ÷ 每股淨資產(帳面價值)。金融股、資產密集型(地產/REITs)常用這項指標。"
+                                metricKey={`${record.symbol}-pb`}
+                              />
+                            </div>
+
+                            {/* 產業、創建日期、距財報、成交量 - 全部展開顯示 */}
+                            <div className="mt-3 pt-3 border-t border-border space-y-2">
+                              <div className="grid grid-cols-2 gap-2 text-sm">
+                                <div>
+                                  <div className="text-muted-foreground text-xs">產業</div>
+                                  <div className="text-xs break-words">{record.industry || record.sector || "N/A"}</div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground text-xs">創建日期</div>
+                                  <div className="text-xs">
+                                    {(activeTab === "ath" || activeTab === "52w_ath")
+                                      ? formatDate(record.ath_date)
+                                      : formatDate(record.atl_date)}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground text-xs">距財報</div>
+                                  <div className="text-xs">
+                                    {record.days_to_earnings !== null ? (
+                                      <span className={record.days_to_earnings <= 3 ? "text-orange-500 font-medium" : ""}>
+                                        {record.days_to_earnings}天
+                                      </span>
+                                    ) : "無資料"}
+                                  </div>
+                                </div>
+                                <div>
+                                  <div className="text-muted-foreground text-xs">成交量</div>
+                                  <div className="font-mono text-xs">{formatVolume(record.volume)}</div>
+                                </div>
+                              </div>
+                              {record.peerAvgForwardPE !== null && (
+                                <div className="text-xs text-muted-foreground">
+                                  同業Forward P/E中位數: {record.peerAvgForwardPE.toFixed(2)} (基於{record.peerCount}家同業)
+                                </div>
+                              )}
+                              {record.peBookHistoricalPercentile !== null && (
+                                <div className="text-xs text-muted-foreground">
+                                  P/B歷史分位: {formatPercentile(record.peBookHistoricalPercentile, "P/B")}
+                                </div>
+                              )}
+                            </div>
+                          </Card>
+                        );
+                      })}
                     </div>
                   </div>
                 ))}
