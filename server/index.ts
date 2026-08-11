@@ -4,9 +4,66 @@ import type { Request } from 'express';
 import { registerRoutes } from "./routes";
 import { serveStatic } from "./static";
 import { createServer } from "node:http";
+import cron from "node-cron";
+import { scanCreditSpreadOpportunities } from "./creditSpreadScanner";
+import { getCachedData } from "./stocks";
 
 const app = express();
 const httpServer = createServer(app);
+
+// ============================================================================
+// Credit Spread Cron Job - 每30分鐘自動掃描
+// ============================================================================
+let isCreditSpreadJobRunning = false;
+
+// 每30分鐘觸發一次，全天候排程；實際掃描與否由 scanCreditSpreadOpportunities 內部的
+// isUSMarketHours() 判斷，非交易時段會自動跳過，不會浪費資源
+cron.schedule("*/30 * * * *", async () => {
+  if (isCreditSpreadJobRunning) {
+    console.log("[NODE-CRON] Credit spread job already running, skipping this trigger");
+    return;
+  }
+
+  isCreditSpreadJobRunning = true;
+  const startTime = Date.now();
+
+  try {
+    console.log("[NODE-CRON] Triggering credit spread scan");
+
+    const cached = getCachedData();
+    if (!cached) {
+      console.log("[NODE-CRON] No cache data available yet, skipping credit spread scan this cycle");
+      return;
+    }
+
+    const { ath, atl } = cached;
+    const combinedStocks = [...ath, ...atl];
+
+    if (combinedStocks.length === 0) {
+      console.log("[NODE-CRON] No ATH/ATL data available yet, skipping credit spread scan this cycle");
+      return;
+    }
+
+    const result = await scanCreditSpreadOpportunities(combinedStocks, "balanced");
+
+    console.log("[NODE-CRON] Credit spread scan finished", {
+      marketStatus: result.marketStatus,
+      bearCallCount: result.bearCallSpreads.length,
+      bullPutCount: result.bullPutSpreads.length,
+      durationMs: Date.now() - startTime,
+    });
+  } catch (e) {
+    console.error("[NODE-CRON] Credit spread scan job failed:", e);
+  } finally {
+    isCreditSpreadJobRunning = false;
+  }
+});
+
+console.log("[NODE-CRON] Credit spread scan job registered (every 30 minutes, market-hours-gated)");
+
+// ============================================================================
+// Express App Setup
+// ============================================================================
 
 declare module "http" {
   interface IncomingMessage {

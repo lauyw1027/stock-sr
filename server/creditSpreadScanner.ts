@@ -56,10 +56,6 @@ export interface SpreadCandidate {
 
 export interface RankedCandidate extends SpreadCandidate {
   score: number;
-  reversalSignal: {
-    confirmed: boolean;
-    strength: number;
-  };
   ivRank: number | null;
   daysToEarnings: number | null;
 }
@@ -212,6 +208,25 @@ export function filterByEarnings(
   }
 
   return { filtered, removed };
+}
+
+// ============ Latest Date Helper ============
+
+/**
+ * Find the latest date in the candidates based on the specified date field
+ * Similar to getLatestResultDate in stocks.ts
+ */
+function getLatestDateInCandidates(
+  candidates: ATHATLRecord[],
+  dateField: "ath_date" | "atl_date"
+): string | null {
+  const dates = candidates
+    .map((record) => record[dateField])
+    .filter((date): date is string => Boolean(date));
+
+  if (dates.length === 0) return null;
+
+  return dates.reduce((latest, date) => (date > latest ? date : latest));
 }
 
 // ============ Technical Reversal Signal Confirmation ============
@@ -491,8 +506,10 @@ export async function getOptionChainWithDelta(
     const now2 = new Date();
     const r = 0.045; // TODO: 未來可改成動態抓取無風險利率
 
-    // 印出 impliedVolatility 原始數值範例以確認單位
-    const sampleCall = expirationData.calls.find((c: any) => c.impliedVolatility != null);
+    // 印出 impliedVolatility 原始數值範例以確認單位（改為挑選ATM附近有流動性的合約）
+    const sampleCall = expirationData.calls
+      .filter((c: any) => c.impliedVolatility != null && (c.openInterest ?? 0) > 0)
+      .sort((a: any, b: any) => Math.abs(a.strike - currentPrice) - Math.abs(b.strike - currentPrice))[0];
     if (sampleCall) {
       const sampleT = (chosenExpiration.getTime() - now2.getTime()) / (365 * 24 * 60 * 60 * 1000);
       const sampleDelta = calculateCallDelta(currentPrice, sampleCall.strike, sampleT, r, sampleCall.impliedVolatility);
@@ -562,7 +579,8 @@ export function selectSpreadStrikes(
   chain: OptionChainResult,
   direction: SpreadDirection,
   config: SpreadConfig,
-  currentPrice: number
+  currentPrice: number,
+  symbol: string
 ): SpreadCandidate | null {
   const { calls, puts } = chain;
   const { shortDeltaRange, longStrikeOffsetPct } = config;
@@ -593,8 +611,22 @@ export function selectSpreadStrikes(
 
     const longCall = longCalls[0];
 
-    const netCredit = shortCall.bid - longCall.ask;
-    const maxLoss = longCall.strike - shortCall.strike - netCredit;
+    const rawNetCredit = shortCall.bid - longCall.ask;
+    const rawMaxLoss = longCall.strike - shortCall.strike - rawNetCredit;
+    const rawROC = rawMaxLoss > 0 ? (rawNetCredit / rawMaxLoss) * 100 : null;
+    console.log(`[CreditSpread] ${symbol} bear_call raw values`, {
+      shortStrike: shortCall.strike,
+      shortBid: shortCall.bid,
+      shortDelta: shortCall.delta,
+      longStrike: longCall.strike,
+      longAsk: longCall.ask,
+      rawNetCredit,
+      rawMaxLoss,
+      rawROC,
+    });
+
+    const netCredit = Math.max(0, rawNetCredit);
+    const maxLoss = Math.max(0, rawMaxLoss);
     const roc = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
     const breakevenPrice = shortCall.strike + netCredit;
     const breakevenBufferPct = Math.abs(breakevenPrice - currentPrice) / currentPrice * 100;
@@ -639,8 +671,22 @@ export function selectSpreadStrikes(
 
     const longPut = longPuts[0];
 
-    const netCredit = shortPut.bid - longPut.ask;
-    const maxLoss = longPut.strike - shortPut.strike - netCredit;
+    const rawNetCredit = shortPut.bid - longPut.ask;
+    const rawMaxLoss = longPut.strike - shortPut.strike - rawNetCredit;
+    const rawROC = rawMaxLoss > 0 ? (rawNetCredit / rawMaxLoss) * 100 : null;
+    console.log(`[CreditSpread] ${symbol} bull_put raw values`, {
+      shortStrike: shortPut.strike,
+      shortBid: shortPut.bid,
+      shortDelta: shortPut.delta,
+      longStrike: longPut.strike,
+      longAsk: longPut.ask,
+      rawNetCredit,
+      rawMaxLoss,
+      rawROC,
+    });
+
+    const netCredit = Math.max(0, rawNetCredit);
+    const maxLoss = Math.max(0, rawMaxLoss);
     const roc = maxLoss > 0 ? (netCredit / maxLoss) * 100 : 0;
     const breakevenPrice = shortPut.strike - netCredit;
     const breakevenBufferPct = Math.abs(breakevenPrice - currentPrice) / currentPrice * 100;
@@ -668,24 +714,17 @@ export function selectSpreadStrikes(
  * 綜合評分候選人
  * 
  * 硬性淘汰條件：
- * - direction === "bull_put" 且 reversalSignal.confirmed === false
  * - candidate.roc < config.minROC
  * - candidate.breakevenBufferPct < config.minBreakevenBufferPct
  * - ivRank === null || ivRank < config.minIVRank
  */
 export function scoreSpreadCandidate(
   candidate: SpreadCandidate,
-  reversalSignal: { confirmed: boolean; strength: number },
   ivRank: number | null,
   direction: SpreadDirection,
   config: SpreadConfig
 ): number | null {
   // 硬性淘汰條件
-  if (direction === "bull_put" && !reversalSignal.confirmed) {
-    console.log(`[CreditSpread] ${candidate.symbol} bull_put 方向無反轉訊號，被淘汰`);
-    return null;
-  }
-
   if (candidate.roc < config.minROC) {
     console.log(`[CreditSpread] ${candidate.symbol} ROC ${candidate.roc.toFixed(1)}% 低於門檻 ${config.minROC}%，被淘汰`);
     return null;
@@ -701,20 +740,50 @@ export function scoreSpreadCandidate(
     return null;
   }
 
-  // 加權評分
-  // ROC: 30%, 緩衝距離: 25%, IV Rank: 25%, 技術訊號: 20%
+  // 加權評分（移除技術訊號後重新分配權重）
+  // ROC: 40%, 緩衝距離: 30%, IV Rank: 30%
   const rocScore = Math.min(100, candidate.roc / config.minROC * 50); // 超過門檻 2 倍得滿分
   const bufferScore = Math.min(100, candidate.breakevenBufferPct / config.minBreakevenBufferPct * 50);
   const ivScore = ivRank; // 本身就是 0-100
-  const signalScore = reversalSignal.strength;
 
   const totalScore = 
-    rocScore * 0.30 +
-    bufferScore * 0.25 +
-    ivScore * 0.25 +
-    signalScore * 0.20;
+    rocScore * 0.40 +
+    bufferScore * 0.30 +
+    ivScore * 0.30;
 
   return Math.round(totalScore);
+}
+
+// ============ US Market Hours Helper ============
+
+/**
+ * 美股正規交易時段判斷（後端版本）
+ * 美東時間 9:30 AM - 4:00 PM，週一到週五
+ * 這裡先不處理美股假期（假期清單另外處理，見下方TODO）
+ */
+function isUSMarketHours(): boolean {
+  const now = new Date();
+
+  // 用Intl API取得美東時間的年月日時分，不依賴外部套件
+  const etFormatter = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York",
+    hour: "numeric",
+    minute: "numeric",
+    weekday: "short",
+    hour12: false,
+  });
+
+  const parts = etFormatter.formatToParts(now);
+  const weekday = parts.find((p) => p.type === "weekday")?.value ?? "";
+  const hour = parseInt(parts.find((p) => p.type === "hour")?.value ?? "0", 10);
+  const minute = parseInt(parts.find((p) => p.type === "minute")?.value ?? "0", 10);
+
+  const isWeekday = !["Sat", "Sun"].includes(weekday);
+  const currentMinutes = hour * 60 + minute;
+  const marketOpenMinutes = 9 * 60 + 30; // 9:30 AM
+  const marketCloseMinutes = 16 * 60; // 4:00 PM
+
+  return isWeekday && currentMinutes >= marketOpenMinutes && currentMinutes < marketCloseMinutes;
 }
 
 // ============ Main Scan Function with Caching ============
@@ -729,15 +798,34 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 export async function scanCreditSpreadOpportunities(
   stocks: ATHATLRecord[],
   style: "conservative" | "balanced" | "aggressive" = "balanced"
-): Promise<{ bearCallSpreads: RankedCandidate[]; bullPutSpreads: RankedCandidate[]; lastUpdated: string }> {
+): Promise<{ bearCallSpreads: RankedCandidate[]; bullPutSpreads: RankedCandidate[]; lastUpdated: string; marketStatus: "open" | "closed" }> {
   const now = Date.now();
 
-  // 檢查快取
-  if (cachedResults && (now - cachedResultsTime) < CACHE_TTL_MS) {
-    console.log(`[CreditSpread] Using cached results (age: ${Math.round((now - cachedResultsTime) / 1000)}s)`);
-    return cachedResults;
+  // 檢查市場是否開市
+  const marketIsOpen = isUSMarketHours();
+  if (!marketIsOpen) {
+    console.log("[CreditSpread] Market is closed — skipping option chain scan, returning cached results if available");
+    
+    // 非交易時段：直接回傳上次交易時段留下的快取結果（如果有）
+    if (cachedResults) {
+      return { ...cachedResults, marketStatus: "closed" };
+    }
+    
+    return {
+      bearCallSpreads: [],
+      bullPutSpreads: [],
+      lastUpdated: new Date().toISOString(),
+      marketStatus: "closed",
+    };
   }
 
+  // 檢查快取（交易時段內才使用快取）
+  if (cachedResults && (now - cachedResultsTime) < CACHE_TTL_MS) {
+    console.log(`[CreditSpread] Using cached results (age: ${Math.round((now - cachedResultsTime) / 1000)}s)`);
+    return { ...cachedResults, marketStatus: "open" };
+  }
+
+  console.log(`[CreditSpread] Scanner version: no-divergence-check-v2`);
   console.log(`[CreditSpread] Starting scan with style: ${style}`);
 
   // 取得風格對應的 Delta 範圍
@@ -758,26 +846,37 @@ export async function scanCreditSpreadOpportunities(
   const { bearCallCandidates, bullPutCandidates } = getCandidatesByDirection(stocks);
   console.log(`[CreditSpread] Initial candidates - Bear Call: ${bearCallCandidates.length}, Bull Put: ${bullPutCandidates.length}`);
 
-  // 2. 財報過濾
-  const filteredBearCall = filterByEarnings(bearCallCandidates, bearCallConfig);
-  const filteredBullPut = filterByEarnings(bullPutCandidates, bullPutConfig);
+  // 2. 篩選最新日期的股票（只對最新日期的股票做選擇權分析）
+  const bearCallLatestDate = getLatestDateInCandidates(bearCallCandidates, "ath_date");
+  const bullPutLatestDate = getLatestDateInCandidates(bullPutCandidates, "atl_date");
+  const bearCallLatestOnly = bearCallCandidates.filter(
+    (c) => bearCallLatestDate !== null && c.ath_date === bearCallLatestDate
+  );
+  const bullPutLatestOnly = bullPutCandidates.filter(
+    (c) => bullPutLatestDate !== null && c.atl_date === bullPutLatestDate
+  );
+  console.log(`[CreditSpread] Latest-date filter — Bear Call: ${bearCallLatestOnly.length}/${bearCallCandidates.length}, Bull Put: ${bullPutLatestOnly.length}/${bullPutCandidates.length}`);
+
+  // 3. 財報過濾（使用最新日期篩選後的清單）
+  const filteredBearCall = filterByEarnings(bearCallLatestOnly, bearCallConfig);
+  const filteredBullPut = filterByEarnings(bullPutLatestOnly, bullPutConfig);
   console.log(`[CreditSpread] After earnings filter - Bear Call: ${filteredBearCall.filtered.length}, Bull Put: ${filteredBullPut.filtered.length}`);
 
-  // 3. 批量處理 Bear Call 候選
+  // 4. 批量處理 Bear Call 候選
   const bearCallResults: RankedCandidate[] = await processCandidates(
     filteredBearCall.filtered,
     "bear_call",
     bearCallConfig
   );
 
-  // 4. 批量處理 Bull Put 候選
+  // 5. 批量處理 Bull Put 候選
   const bullPutResults: RankedCandidate[] = await processCandidates(
     filteredBullPut.filtered,
     "bull_put",
     bullPutConfig
   );
 
-  // 5. 按分數排序
+  // 6. 按分數排序
   bearCallResults.sort((a, b) => b.score - a.score);
   bullPutResults.sort((a, b) => b.score - a.score);
 
@@ -793,7 +892,7 @@ export async function scanCreditSpreadOpportunities(
 
   console.log(`[CreditSpread] Scan complete - Bear Call: ${bearCallResults.length}, Bull Put: ${bullPutResults.length}`);
 
-  return results;
+  return { ...results, marketStatus: "open" };
 }
 
 /**
@@ -846,27 +945,18 @@ async function processSingleStock(
   config: SpreadConfig
 ): Promise<RankedCandidate | null> {
   try {
-    // 3. 技術面反轉訊號確認
-    const reversalSignal = await confirmReversalSignal(stock, direction);
-    
-    // Bull Put 方向：沒有反轉訊號直接淘汰
-    if (direction === "bull_put" && !reversalSignal.confirmed) {
-      console.log(`[CreditSpread] ${stock.symbol} (bull_put) 技術面無反轉訊號，被排除`);
-      return null;
-    }
-
-    // 4. IV Rank 計算
+    // IV Rank 計算
     const ivRank = await calculateIVRank(stock.symbol);
 
-    // 5. 選擇權鏈抓取
+    // 選擇權鏈抓取
     const optionChain = await getOptionChainWithDelta(stock.symbol);
     if (!optionChain) {
       console.log(`[CreditSpread] ${stock.symbol} 無法取得選擇權鏈資料`);
       return null;
     }
 
-    // 6. 履約價選擇
-    const candidate = selectSpreadStrikes(optionChain, direction, config, stock.last_close);
+    // 履約價選擇
+    const candidate = selectSpreadStrikes(optionChain, direction, config, stock.last_close, stock.symbol);
     if (!candidate) {
       console.log(`[CreditSpread] ${stock.symbol} 無法找到合適的履約價組合`);
       return null;
@@ -876,8 +966,8 @@ async function processSingleStock(
     candidate.symbol = stock.symbol;
     candidate.companyName = stock.company_name;
 
-    // 7. 評分
-    const score = scoreSpreadCandidate(candidate, reversalSignal, ivRank, direction, config);
+    // 評分
+    const score = scoreSpreadCandidate(candidate, ivRank, direction, config);
     if (score === null) {
       return null;
     }
@@ -885,7 +975,6 @@ async function processSingleStock(
     return {
       ...candidate,
       score,
-      reversalSignal,
       ivRank,
       daysToEarnings: stock.days_to_earnings,
     };
