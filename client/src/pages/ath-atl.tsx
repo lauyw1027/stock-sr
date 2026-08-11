@@ -1,5 +1,5 @@
-import { useState, useMemo, useEffect } from "react";
-import { useMutation } from "@tanstack/react-query";
+import React, { useState, useMemo, useEffect } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { apiRequest } from "@/lib/queryClient";
 import { Layout } from "@/components/Layout";
 import { Card } from "@/components/ui/card";
@@ -20,6 +20,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   TrendingUp,
   TrendingDown,
@@ -160,6 +161,23 @@ export default function ATHATLPage() {
   const [search, setSearch] = useState("");
   const [exchange, setExchange] = useState<string>("all");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
+  const [activeDetailTab, setActiveDetailTab] = useState<Record<string, "valuation" | "distribution" | "creditspread">>({});
+
+  // 取得股票適用的標籤列表
+  const getAvailableTabs = (record: ATHATLRecord): { key: "valuation" | "distribution" | "creditspread"; label: string }[] => {
+    const isATHType = record.list_type === "ATH" || record.list_type === "52W_ATH";
+    const tabs: { key: "valuation" | "distribution" | "creditspread"; label: string }[] = [
+      { key: "valuation", label: "估值" },
+    ];
+    // 出貨評分僅適用於 ATH 類型（判斷創新高後的派發風險）
+    if (isATHType) {
+      tabs.push({ key: "distribution", label: "出貨評分" });
+    }
+    // 信用價差適用於所有類型
+    tabs.push({ key: "creditspread", label: "期權分析" });
+    return tabs;
+  };
+
   const getDefaultSortField = (tab: TabType): SortField => {
     if (tab === "ath" || tab === "52w_ath") return "ath_date";
     return "atl_date";
@@ -439,6 +457,208 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
     );
   }
 
+  // ============ 詳情面板元件 ============
+
+  // 估值標籤內容 - 直接使用主掃描已取得的資料
+  function ValuationTabContent({ record }: { record: ATHATLRecord }) {
+    return (
+      <div className="space-y-2 text-sm">
+        <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+          <div className="text-muted-foreground">Forward P/E</div>
+          <div className="font-mono">{record.forwardPE !== null ? formatValuation(record.forwardPE) : "N/A"}</div>
+          
+          <div className="text-muted-foreground">PEG (短期)</div>
+          <div className="font-mono">
+            {shouldShowPEG(record.sectorCategory) && record.pegNearTerm !== null 
+              ? formatValuation(record.pegNearTerm) 
+              : getPEGDisplayNote(record.sectorCategory) ?? "N/A"}
+          </div>
+          
+          <div className="text-muted-foreground">P/S</div>
+          <div className="font-mono">{record.priceToSales !== null ? formatValuation(record.priceToSales) : "N/A"}</div>
+          
+          <div className="text-muted-foreground">P/B</div>
+          <div className="font-mono">
+            {record.priceToBook !== null ? formatValuation(record.priceToBook) : "N/A"}
+            {record.peBookHistoricalPercentile !== null && (
+              <span className="ml-2 text-xs text-muted-foreground">
+                ({formatPercentile(record.peBookHistoricalPercentile, "P/B")})
+              </span>
+            )}
+          </div>
+          
+          <div className="text-muted-foreground">股息率</div>
+          <div className="font-mono">{record.dividendYield !== null ? (record.dividendYield * 100).toFixed(2) + "%" : "N/A"}</div>
+          
+          {record.peerAvgForwardPE !== null && (
+            <>
+              <div className="text-muted-foreground">同業Forward P/E</div>
+              <div className="font-mono">{record.peerAvgForwardPE.toFixed(2)} (基於{record.peerCount}家)</div>
+            </>
+          )}
+        </div>
+        
+        <div className="pt-2 mt-2 border-t border-border">
+          <div className="text-xs text-muted-foreground">
+            主要估值指標：{record.primaryValuationMetric}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // 出貨評分標籤內容 - 點擊時才發請求
+  function DistributionScoreTabContent({ symbol }: { symbol: string }) {
+    const { data, isLoading, isError } = useQuery({
+      queryKey: ["distribution-score", symbol],
+      queryFn: async () => {
+        const res = await apiRequest("GET", `/api/distribution-score/${symbol}`);
+        return await res.json();
+      },
+      staleTime: 15 * 60 * 1000, // 15分鐘內不重複請求
+      enabled: false, // 預設不自動請求，等使用者切換到這個標籤
+    });
+
+    const [fetchWhenVisible, setFetchWhenVisible] = useState(false);
+
+    // 當切換到這個標籤時才觸發請求
+    useEffect(() => {
+      setFetchWhenVisible(true);
+    }, []);
+
+    // 真正 fetch
+    const { data: fetchedData, isLoading: actualLoading } = useQuery({
+      queryKey: ["distribution-score", symbol, "fetched"],
+      queryFn: async () => {
+        const res = await apiRequest("GET", `/api/distribution-score/${symbol}`);
+        return await res.json();
+      },
+      staleTime: 15 * 60 * 1000,
+      enabled: fetchWhenVisible,
+    });
+
+    const displayData = fetchedData || data;
+    const loading = actualLoading || isLoading;
+
+    if (loading && !displayData) {
+      return <div className="text-sm text-muted-foreground">計算中...</div>;
+    }
+
+    if (isError || !displayData) {
+      return <div className="text-sm text-muted-foreground">目前無法取得出貨評分</div>;
+    }
+
+    if (displayData.error) {
+      return <div className="text-sm text-muted-foreground">{displayData.error}</div>;
+    }
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-bold">{displayData.totalScore}%</span>
+          <span className="text-sm text-muted-foreground">出貨機率評分</span>
+        </div>
+        
+        <div className="space-y-1 text-sm">
+          {displayData.signals?.map((signal: any, idx: number) => (
+            <div key={idx} className="flex justify-between">
+              <span className="text-muted-foreground">{signal.label}</span>
+              <span>{signal.detail}</span>
+            </div>
+          ))}
+        </div>
+
+        {displayData.signals?.some((s: any) => s.name === "shortVolumeRatio") && (
+          <p className="text-xs text-muted-foreground italic mt-2 border-t border-border pt-2">
+            放空成交量佔比僅供交叉參考，不直接等於做空訊號，也可能是做市商避險行為。
+          </p>
+        )}
+      </div>
+    );
+  }
+
+  // 信用價差標籤內容 - 查詢現有快取
+  function CreditSpreadTabContent({ symbol }: { symbol: string }) {
+    const { data, isLoading } = useQuery({
+      queryKey: ["credit-spread-single", symbol],
+      queryFn: async () => {
+        const res = await apiRequest("GET", `/api/credit-spread/${symbol}`);
+        return await res.json();
+      },
+      staleTime: 5 * 60 * 1000, // 5分鐘快取
+    });
+
+    if (isLoading) {
+      return <div className="text-sm text-muted-foreground">查詢中...</div>;
+    }
+
+    if (!data?.found) {
+      return <div className="text-sm text-muted-foreground">{data?.reason ?? "無資料"}</div>;
+    }
+
+    return (
+      <div className="space-y-2 text-sm">
+        {data.bearCall && (
+          <div className="border-l-2 border-green-500 pl-3">
+            <div className="font-medium">Bear Call Spread</div>
+            <div className="text-muted-foreground text-xs">
+              賣 {data.bearCall.shortStrike} / 買 {data.bearCall.longStrike}，ROC {data.bearCall.roc?.toFixed(1)}%，評分 {data.bearCall.score}
+            </div>
+          </div>
+        )}
+        
+        {data.bullPut && (
+          <div className="border-l-2 border-red-500 pl-3">
+            <div className="font-medium">Bull Put Spread</div>
+            <div className="text-muted-foreground text-xs">
+              賣 {data.bullPut.shortStrike} / 買 {data.bullPut.longStrike}，ROC {data.bullPut.roc?.toFixed(1)}%，評分 {data.bullPut.score}
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // 詳情面板
+  function StockDetailPanel({
+    record,
+  }: {
+    record: ATHATLRecord;
+  }) {
+    const availableTabs = getAvailableTabs(record);
+    const currentTab = activeDetailTab[record.symbol] || "valuation";
+    
+    const handleTabChange = (tab: "valuation" | "distribution" | "creditspread") => {
+      setActiveDetailTab(prev => ({ ...prev, [record.symbol]: tab }));
+    };
+
+    return (
+      <div className="mt-3 border-t border-border pt-3">
+        <div className="flex gap-2 mb-3 flex-wrap">
+          {availableTabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => handleTabChange(tab.key)}
+              className={`px-3 py-1.5 text-sm rounded-md transition-colors ${
+                currentTab === tab.key 
+                  ? "bg-primary text-primary-foreground" 
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+        
+        <div className="bg-muted/30 rounded-md p-3">
+          {currentTab === "valuation" && <ValuationTabContent record={record} />}
+          {currentTab === "distribution" && <DistributionScoreTabContent symbol={record.symbol} />}
+          {currentTab === "creditspread" && <CreditSpreadTabContent symbol={record.symbol} />}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <Layout title="ATH / ATL Scanner" subtitle="歷史新高/新低 | All-Time High & Low">
       <main className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 space-y-3 sm:space-y-4">
@@ -674,15 +894,15 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                         </TableHeader>
                         <TableBody>
                           {records.map((record) => (
-                            <TableRow
-                              key={record.symbol}
-                              className={activeTab === "ath" ? "bg-green-500/5" : "bg-red-500/5"}
-                            >
-                              <TableCell className="font-mono font-medium py-2">
-                                <div className="flex items-center gap-2">
-                                  {record.symbol}
-                                </div>
-                              </TableCell>
+                            <React.Fragment key={record.symbol}>
+                              <TableRow
+                                className={activeTab === "ath" ? "bg-green-500/5" : "bg-red-500/5"}
+                              >
+                                <TableCell className="font-mono font-medium py-2">
+                                  <div className="flex items-center gap-2">
+                                    {record.symbol}
+                                  </div>
+                                </TableCell>
                               <TableCell className="max-w-[200px] truncate py-2">
                                 {record.company_name}
                               </TableCell>
@@ -783,7 +1003,25 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                                   <span className="text-muted-foreground text-xs">N/A</span>
                                 )}
                               </TableCell>
-                            </TableRow>
+                              <TableCell className="py-2">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    onClick={() => toggleCardExpand(record.symbol)}
+                                    className="h-8 px-2 text-xs"
+                                  >
+                                    {expandedCards.has(record.symbol) ? "收起" : "詳情"}
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                              {expandedCards.has(record.symbol) && (
+                                <TableRow>
+                                  <TableCell colSpan={11} className="p-0 bg-muted/20">
+                                    <StockDetailPanel record={record} />
+                                  </TableCell>
+                                </TableRow>
+                              )}
+                            </React.Fragment>
                           ))}
                         </TableBody>
                       </Table>
@@ -894,6 +1132,22 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                                 <div className="text-xs text-muted-foreground">
                                   P/B歷史分位: {formatPercentile(record.peBookHistoricalPercentile, "P/B")}
                                 </div>
+                              )}
+                            </div>
+
+                            {/* 展開詳情按鈕 */}
+                            <div className="mt-3 pt-3 border-t border-border">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={() => toggleCardExpand(record.symbol)}
+                                className="w-full"
+                              >
+                                {expandedCards.has(record.symbol) ? "收起詳情" : "查看詳情"}
+                              </Button>
+                              
+                              {expandedCards.has(record.symbol) && (
+                                <StockDetailPanel record={record} />
                               )}
                             </div>
                           </Card>

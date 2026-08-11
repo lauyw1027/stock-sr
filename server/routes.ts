@@ -15,6 +15,7 @@ import { scanAllStocks, getCachedDivergence, filterDivergenceResults } from "./d
 import { registerCreditMonitorRoutes } from "./routes/creditMonitor";
 import { registerCarryTradeRoutes } from "./routes/carryTrade";
 import { scanCreditSpreadOpportunities } from "./creditSpreadScanner";
+import { computeDistributionScoreForTicker } from "./distributionScore";
 
 // yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
@@ -399,6 +400,65 @@ export async function registerRoutes(
     } catch (e: any) {
       console.error("[API] Credit Spread error:", e);
       res.status(500).json({ error: "Failed to generate credit spread recommendations", detail: e.message });
+    }
+  });
+
+  // ============ Single Stock Detail APIs (On-Demand) ============
+
+  // 出貨評分單股 API - 只在使用者點擊時觸發，不在批量掃描時呼叫
+  app.get("/api/distribution-score/:ticker", async (req: Request, res: Response) => {
+    try {
+      const { ticker } = req.params;
+      
+      if (!ticker) {
+        return res.status(400).json({ error: "缺少股票代號" });
+      }
+
+      console.log(`[API] Computing distribution score for ${ticker}`);
+      const result = await computeDistributionScoreForTicker(ticker.toUpperCase());
+      
+      res.json(result);
+    } catch (e: any) {
+      console.error("[API] Distribution Score error:", e);
+      res.status(500).json({ error: "計算出貨評分時發生錯誤", detail: e.message });
+    }
+  });
+
+  // 信用價差單股查詢 - 從現有快取查找，不重新計算
+  app.get("/api/credit-spread/:ticker", async (req: Request, res: Response) => {
+    try {
+      const { ticker } = req.params;
+      
+      if (!ticker) {
+        return res.status(400).json({ error: "缺少股票代號" });
+      }
+
+      const symbol = ticker.toUpperCase();
+      
+      // 從 creditSpreadScanner 模組獲取快取結果
+      // 我們需要 import 相關函數
+      const { getCachedCreditSpreadResults } = await import("./creditSpreadScanner");
+      const cached = getCachedCreditSpreadResults();
+      
+      if (!cached) {
+        return res.json({ found: false, reason: "尚無掃描結果，請先執行信用價差掃描" });
+      }
+      
+      const bearCallMatch = cached.bearCallSpreads?.find((c: any) => c.symbol === symbol);
+      const bullPutMatch = cached.bullPutSpreads?.find((c: any) => c.symbol === symbol);
+      
+      if (!bearCallMatch && !bullPutMatch) {
+        return res.json({ found: false, reason: "此股票目前不在信用價差候選清單中" });
+      }
+      
+      res.json({ 
+        found: true, 
+        bearCall: bearCallMatch ?? null, 
+        bullPut: bullPutMatch ?? null 
+      });
+    } catch (e: any) {
+      console.error("[API] Credit Spread single query error:", e);
+      res.status(500).json({ error: "查詢信用價差資料時發生錯誤", detail: e.message });
     }
   });
 

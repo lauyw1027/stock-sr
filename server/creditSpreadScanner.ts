@@ -793,6 +793,14 @@ let cachedResultsTime = 0;
 const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
 
 /**
+ * 獲取信用價差掃描的快取結果
+ * 供單股票查詢 API 使用
+ */
+export function getCachedCreditSpreadResults(): { bearCallSpreads: RankedCandidate[]; bullPutSpreads: RankedCandidate[]; lastUpdated: string } | null {
+  return cachedResults;
+}
+
+/**
  * 主掃描函數
  */
 export async function scanCreditSpreadOpportunities(
@@ -985,10 +993,6 @@ async function processSingleStock(
 }
 
 // ============ Cache Management ============
-
-export function getCachedCreditSpreadResults(): { bearCallSpreads: RankedCandidate[]; bullPutSpreads: RankedCandidate[]; lastUpdated: string } | null {
-  return cachedResults;
-}
 
 export function clearCreditSpreadCache(): void {
   cachedResults = null;
