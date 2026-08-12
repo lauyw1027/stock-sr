@@ -161,17 +161,22 @@ export default function ATHATLPage() {
   const [search, setSearch] = useState("");
   const [exchange, setExchange] = useState<string>("all");
   const [expandedCards, setExpandedCards] = useState<Set<string>>(new Set());
-  const [activeDetailTab, setActiveDetailTab] = useState<Record<string, "valuation" | "distribution" | "creditspread">>({});
+  const [activeDetailTab, setActiveDetailTab] = useState<Record<string, "valuation" | "distribution" | "creditspread" | "accumulation">>({});
 
   // 取得股票適用的標籤列表
-  const getAvailableTabs = (record: ATHATLRecord): { key: "valuation" | "distribution" | "creditspread"; label: string }[] => {
+  const getAvailableTabs = (record: ATHATLRecord): { key: "valuation" | "distribution" | "creditspread" | "accumulation"; label: string }[] => {
     const isATHType = record.list_type === "ATH" || record.list_type === "52W_ATH";
-    const tabs: { key: "valuation" | "distribution" | "creditspread"; label: string }[] = [
+    const isATLType = record.list_type === "ATL" || record.list_type === "52W_ATL";
+    const tabs: { key: "valuation" | "distribution" | "creditspread" | "accumulation"; label: string }[] = [
       { key: "valuation", label: "估值" },
     ];
     // 出貨評分僅適用於 ATH 類型（判斷創新高後的派發風險）
     if (isATHType) {
       tabs.push({ key: "distribution", label: "出貨評分" });
+    }
+    // 建倉評分僅適用於 ATL 類型（判斷創低點後的建倉訊號）
+    if (isATLType) {
+      tabs.push({ key: "accumulation", label: "建倉評分" });
     }
     // 信用價差適用於所有類型
     tabs.push({ key: "creditspread", label: "期權分析" });
@@ -577,6 +582,76 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
     );
   }
 
+  // 建倉評分標籤內容 - 點擊時才發請求 (綠色系配色)
+  function AccumulationScoreTabContent({ symbol }: { symbol: string }) {
+    const { data, isLoading, isError } = useQuery({
+      queryKey: ["accumulation-score", symbol],
+      queryFn: async () => {
+        const res = await apiRequest("GET", `/api/accumulation-score/${symbol}`);
+        return await res.json();
+      },
+      staleTime: 15 * 60 * 1000, // 15分鐘內不重複請求
+      enabled: false, // 預設不自動請求，等使用者切換到這個標籤
+    });
+
+    const [fetchWhenVisible, setFetchWhenVisible] = useState(false);
+
+    // 當切換到這個標籤時才觸發請求
+    useEffect(() => {
+      setFetchWhenVisible(true);
+    }, []);
+
+    // 真正 fetch
+    const { data: fetchedData, isLoading: actualLoading } = useQuery({
+      queryKey: ["accumulation-score", symbol, "fetched"],
+      queryFn: async () => {
+        const res = await apiRequest("GET", `/api/accumulation-score/${symbol}`);
+        return await res.json();
+      },
+      staleTime: 15 * 60 * 1000,
+      enabled: fetchWhenVisible,
+    });
+
+    const displayData = fetchedData || data;
+    const loading = actualLoading || isLoading;
+
+    if (loading && !displayData) {
+      return <div className="text-sm text-muted-foreground">計算中...</div>;
+    }
+
+    if (isError || !displayData) {
+      return <div className="text-sm text-muted-foreground">目前無法取得建倉評分</div>;
+    }
+
+    if (displayData.error) {
+      return <div className="text-sm text-muted-foreground">{displayData.error}</div>;
+    }
+
+    return (
+      <div className="space-y-2">
+        <div className="flex items-center gap-2">
+          <span className="text-2xl font-bold text-green-500">{displayData.totalScore}%</span>
+          <span className="text-sm text-muted-foreground">建倉信心評分</span>
+        </div>
+        
+        <div className="space-y-1 text-sm">
+          {displayData.signals?.map((signal: any, idx: number) => (
+            <div key={idx} className="flex justify-between">
+              <span className="text-muted-foreground">{signal.label}</span>
+              <span>{signal.detail}</span>
+            </div>
+          ))}
+        </div>
+
+        {displayData.signals?.some((s: any) => s.name === "shortSqueezeSetup") && (
+          <p className="text-xs text-muted-foreground italic mt-2 border-t border-border pt-2">
+            高放空比例代表空頭部位擁擠，一旦股價止跌反彈，空頭被迫回補可能形成逼空。
+          </p>
+        )}
+      </div>
+    );
+  }
+
   // 信用價差標籤內容 - 查詢現有快取
   function CreditSpreadTabContent({ symbol }: { symbol: string }) {
     const { data, isLoading } = useQuery({
@@ -628,7 +703,7 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
     const availableTabs = getAvailableTabs(record);
     const currentTab = activeDetailTab[record.symbol] || "valuation";
     
-    const handleTabChange = (tab: "valuation" | "distribution" | "creditspread") => {
+    const handleTabChange = (tab: "valuation" | "distribution" | "creditspread" | "accumulation") => {
       setActiveDetailTab(prev => ({ ...prev, [record.symbol]: tab }));
     };
 
@@ -653,6 +728,7 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
         <div className="bg-muted/30 rounded-md p-3">
           {currentTab === "valuation" && <ValuationTabContent record={record} />}
           {currentTab === "distribution" && <DistributionScoreTabContent symbol={record.symbol} />}
+          {currentTab === "accumulation" && <AccumulationScoreTabContent symbol={record.symbol} />}
           {currentTab === "creditspread" && <CreditSpreadTabContent symbol={record.symbol} />}
         </div>
       </div>

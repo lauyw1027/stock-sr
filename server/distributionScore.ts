@@ -864,14 +864,52 @@ export async function computeDistributionScoreForTicker(
       };
     }
 
-    const bars: OHLCVBar[] = (chart?.quotes ?? []).map((q: any) => ({
+    const rawQuotes = chart?.quotes ?? [];
+
+    // 先過濾掉含 null/undefined 的殘缺資料（通常是當日或前一交易日尚未結算的K棒）
+    const droppedBars: any[] = [];
+    const validQuotes = rawQuotes.filter((q: any) => {
+      const isValid =
+        q.close !== null && q.close !== undefined &&
+        q.open !== null && q.open !== undefined &&
+        q.high !== null && q.high !== undefined &&
+        q.low !== null && q.low !== undefined;
+      if (!isValid) {
+        droppedBars.push({
+          date: q.date,
+          open: q.open,
+          high: q.high,
+          low: q.low,
+          close: q.close,
+          volume: q.volume,
+        });
+      }
+      return isValid;
+    });
+
+    if (droppedBars.length > 0) {
+      console.log(`[DistributionScore] Dropped ${droppedBars.length} incomplete bar(s) for ${ticker}:`, droppedBars);
+    }
+
+    const bars: OHLCVBar[] = validQuotes.map((q: any) => ({
       date: q.date,
-      open: q.open ?? 0,
-      high: q.high ?? 0,
-      low: q.low ?? 0,
-      close: q.close ?? 0,
-      volume: q.volume ?? 0,
+      open: q.open,
+      high: q.high,
+      low: q.low,
+      close: q.close,
+      volume: q.volume ?? 0, // volume可以容忍0，但OHLC不行
     }));
+
+    // Debug: 印出過濾後bars陣列的頭尾資訊，方便核對
+    console.log(`[DistributionScore] Final bars for ${ticker}:`, {
+      totalBars: bars.length,
+      firstDate: bars[0]?.date,
+      lastDate: bars[bars.length - 1]?.date,
+      overallMaxHigh: Math.max(...bars.map((b) => b.high)),
+      overallMaxHighDate: bars.find((b) => b.high === Math.max(...bars.map((b2) => b2.high)))?.date,
+      last20MaxHigh: Math.max(...bars.slice(-20).map((b) => b.high)),
+      last30MaxHigh: Math.max(...bars.slice(-30).map((b) => b.high)),
+    });
 
     if (bars.length < 50) {
       return {

@@ -16,6 +16,7 @@ import { registerCreditMonitorRoutes } from "./routes/creditMonitor";
 import { registerCarryTradeRoutes } from "./routes/carryTrade";
 import { scanCreditSpreadOpportunities } from "./creditSpreadScanner";
 import { computeDistributionScoreForTicker } from "./distributionScore";
+import { computeAccumulationScoreForTicker } from "./accumulationScore";
 
 // yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
@@ -421,6 +422,25 @@ export async function registerRoutes(
     } catch (e: any) {
       console.error("[API] Distribution Score error:", e);
       res.status(500).json({ error: "計算出貨評分時發生錯誤", detail: e.message });
+    }
+  });
+
+  // 建倉評分單股 API - 只在使用者點擊時觸發，不在批量掃描時呼叫
+  app.get("/api/accumulation-score/:ticker", async (req: Request, res: Response) => {
+    try {
+      const { ticker } = req.params;
+      
+      if (!ticker) {
+        return res.status(400).json({ error: "缺少股票代號" });
+      }
+
+      console.log(`[API] Computing accumulation score for ${ticker}`);
+      const result = await computeAccumulationScoreForTicker(ticker.toUpperCase());
+      
+      res.json(result);
+    } catch (e: any) {
+      console.error("[API] Accumulation Score error:", e);
+      res.status(500).json({ error: "計算建倉評分時發生錯誤", detail: e.message });
     }
   });
 

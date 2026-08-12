@@ -694,6 +694,28 @@ async function enrichWithValuationData(
 }
 
 /**
+ * Post-processing: Enrich ATH/ATL records with earnings data
+ * This is called after the main scan completes with the smaller result list
+ * Moved here from parallel fetch in scanSingleStock to avoid unnecessary API calls
+ * for stocks that don't end up being ATH/ATL
+ */
+async function enrichWithEarningsData(records: ATHATLRecord[]): Promise<void> {
+  console.log(`[Earnings] Enriching ${records.length} records`);
+
+  await Promise.all(
+    records.map(async (record) => {
+      try {
+        const earningsInfo = await getNextEarningsDate(record.symbol);
+        record.next_earnings_date = earningsInfo.date;
+        record.days_to_earnings = earningsInfo.daysUntil;
+      } catch (e) {
+        console.error(`[Earnings] Enrichment failed for ${record.symbol}:`, e);
+      }
+    })
+  );
+}
+
+/**
  * Find the latest result date in the records
  */
 function getLatestResultDate(records: ATHATLRecord[], dateField: "ath_date" | "atl_date"): string | null {
@@ -793,19 +815,11 @@ async function fetchNASDAQ100FromWikipedia(): Promise<StockInfo[]> {
   });
   
   if (stocks.length === 0) {
-    // Try alternative: look for links with ticker-like text
-    $("a").each((_, el) => {
-      const text = $(el).text().trim().toUpperCase();
-      if (text.length >= 1 && text.length <= 5 && /^[A-Z]+$/.test(text)) {
-        if (!stocks.find(s => s.symbol === text)) {
-          stocks.push({
-            symbol: text,
-            exchange: "NASDAQ",
-            companyName: text,
-          });
-        }
-      }
-    });
+    // 主要表格解析失敗時，改用SEC官方ticker清單做交叉驗證，
+    // 不再無條件把頁面上任何1-5字母的連結文字當成ticker
+    console.warn(`[StockList] NASDAQ-100 table parsing failed, page structure may have changed. Skipping unreliable link-scanning fallback.`);
+    console.warn(`[StockList] Will rely on cached data or SEC ticker list as fallback instead.`);
+    return []; // 直接回傳空陣列，讓上層的cache/SEC備援機制接手，不產生垃圾資料
   }
   
   console.log(`[StockList] Loaded ${stocks.length} NASDAQ-100 stocks from Wikipedia`);
@@ -897,8 +911,26 @@ async function fetchCombinedStockListFromWikipedia(): Promise<StockInfo[]> {
   }
   
   const result = Array.from(seen.values());
-  console.log(`[StockList] Combined ${result.length} unique stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length}, Russell 1000: ${russell1000.length})`);
-  return result;
+
+  // 新增：用SEC官方ticker清單交叉驗證，過濾掉任何不存在的symbol
+  try {
+    const secTickers = await fetchAllTickersFromSEC();
+    const validSymbols = new Set(secTickers.map((s) => s.symbol));
+    const beforeCount = result.length;
+    const validated = result.filter((s) => validSymbols.has(s.symbol));
+    const droppedCount = beforeCount - validated.length;
+
+    if (droppedCount > 0) {
+      console.warn(`[StockList] Dropped ${droppedCount} invalid/non-existent symbols after SEC cross-validation`);
+    }
+
+    console.log(`[StockList] Combined ${validated.length} unique validated stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length}, Russell 1000: ${russell1000.length})`);
+    return validated;
+  } catch (e) {
+    console.error(`[StockList] SEC cross-validation failed, using unvalidated list:`, e);
+    console.log(`[StockList] Combined ${result.length} unique stocks (S&P 500: ${sp500.length}, NASDAQ-100: ${nasdaq100.length}, Russell 1000: ${russell1000.length})`);
+    return result;
+  }
 }
 
 /**
@@ -1417,7 +1449,9 @@ export async function scanAthAtl(forceRefresh = false): Promise<{ ath: ATHATLRec
 
   // Post-processing: enrich with valuation data
   await enrichWithValuationData(results.ath, "ath_date");
+  await enrichWithEarningsData(results.ath);
   await enrichWithValuationData(results.atl, "atl_date");
+  await enrichWithEarningsData(results.atl);
 
   cachedData = results;
   cachedDataTime = Date.now();
@@ -1446,15 +1480,13 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 5);
 
-    // Parallel fetch: chart data and earnings date only (valuation done in post-processing)
-    const [chart, earningsInfo] = await Promise.all([
-      yahooFinance.chart(stock.symbol, {
-        period1: startDate,
-        period2: endDate,
-        interval: "1d",
-      }),
-      getNextEarningsDate(stock.symbol),
-    ]);
+    // Only fetch chart data here, earnings will be fetched in post-processing
+    // This avoids unnecessary API calls for stocks that won't be ATH/ATL
+    const chart = await yahooFinance.chart(stock.symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1d",
+    });
 
     const hist = chart?.quotes ?? [];
 
@@ -1514,8 +1546,8 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "ATH",
-        next_earnings_date: earningsInfo.date,
-        days_to_earnings: earningsInfo.daysUntil,
+        next_earnings_date: null, // Will be filled in post-processing
+        days_to_earnings: null,
         // Valuation fields - will be filled in post-processing
         forwardPE: null,
         pegNearTerm: null,
@@ -1548,8 +1580,8 @@ async function scanSingleStock(stock: StockInfo): Promise<ATHATLRecord | null> {
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "ATL",
-        next_earnings_date: earningsInfo.date,
-        days_to_earnings: earningsInfo.daysUntil,
+        next_earnings_date: null, // Will be filled in post-processing
+        days_to_earnings: null,
         // Valuation fields - will be filled in post-processing
         forwardPE: null,
         pegNearTerm: null,
@@ -1649,7 +1681,9 @@ export async function scan52wAthAtl(forceRefresh = false): Promise<{ ath52w: ATH
 
   // Post-processing: enrich with valuation data
   await enrichWithValuationData(results.ath52w, "ath_date");
+  await enrichWithEarningsData(results.ath52w);
   await enrichWithValuationData(results.atl52w, "atl_date");
+  await enrichWithEarningsData(results.atl52w);
 
   cached52wData = results;
   cached52wDataTime = Date.now();
@@ -1676,15 +1710,13 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
     const startDate = new Date();
     startDate.setFullYear(startDate.getFullYear() - 2);
 
-    // Parallel fetch: chart data and earnings date only (valuation done in post-processing)
-    const [chart, earningsInfo] = await Promise.all([
-      yahooFinance.chart(stock.symbol, {
-        period1: startDate,
-        period2: endDate,
-        interval: "1d",
-      }),
-      getNextEarningsDate(stock.symbol),
-    ]);
+    // 只抓K線資料，不再平行抓earnings，跟scanSingleStock()保持一致
+    // earnings會在post-processing的enrichWithEarningsData()裡，只對最終確認的52週ATH/ATL股票才查
+    const chart = await yahooFinance.chart(stock.symbol, {
+      period1: startDate,
+      period2: endDate,
+      interval: "1d",
+    });
 
     const hist = chart?.quotes ?? [];
 
@@ -1748,8 +1780,8 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "52W_ATH",
-        next_earnings_date: earningsInfo.date,
-        days_to_earnings: earningsInfo.daysUntil,
+        next_earnings_date: null, // Will be filled in post-processing
+        days_to_earnings: null,
         // Valuation fields - will be filled in post-processing
         forwardPE: null,
         pegNearTerm: null,
@@ -1782,8 +1814,8 @@ async function scanSingleStock52w(stock: StockInfo): Promise<ATHATLRecord | null
         change_pct: Math.round(changePct * 100) / 100,
         volume: latestData.volume || 0,
         list_type: "52W_ATL",
-        next_earnings_date: earningsInfo.date,
-        days_to_earnings: earningsInfo.daysUntil,
+        next_earnings_date: null, // Will be filled in post-processing
+        days_to_earnings: null,
         // Valuation fields - will be filled in post-processing
         forwardPE: null,
         pegNearTerm: null,
