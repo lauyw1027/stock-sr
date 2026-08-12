@@ -75,15 +75,30 @@ export async function fetchFinraShortVolume(
   lookbackDays: number = 25
 ): Promise<FinraShortVolumeBar[]> {
   const attemptFetch = async (): Promise<FinraShortVolumeBar[]> => {
+    // 明確指定日期範圍：往前抓lookbackDays天的日曆天數再加緩衝，
+    // 因為regShoDaily只在交易日產生資料，且FINRA數據本身有約2天延遲
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setDate(startDate.getDate() - Math.ceil(lookbackDays * 1.6) - 5); // 交易日轉日曆天緩衝+延遲緩衝
+
+    const formatDate = (d: Date): string => d.toISOString().slice(0, 10); // YYYY-MM-DD
+
     const response = await axios.post(
       "https://api.finra.org/data/group/otcMarket/name/regShoDaily",
       {
-        limit: lookbackDays,
+        limit: lookbackDays * 5, // 每天可能有多個市場代碼(NCTRF/NQTRF/NYTRF)，提高limit避免漏抓
         compareFilters: [
           {
             compareType: "equal",
             fieldName: "securitiesInformationProcessorSymbolIdentifier",
             fieldValue: symbol.toUpperCase(),
+          },
+        ],
+        dateRangeFilters: [
+          {
+            startDate: formatDate(startDate),
+            endDate: formatDate(endDate),
+            fieldName: "tradeReportDate",
           },
         ],
       },
@@ -148,8 +163,30 @@ export async function fetchFinraShortVolume(
       }
     }
 
-    console.log(`[FinraShortVolume] Fetched ${result.length} records for ${symbol}`);
-    return result;
+    console.log(`[FinraShortVolume] Fetched ${result.length} raw records for ${symbol}`);
+
+    // 依日期分組加總，避免同一天多個市場代碼被當成獨立記錄
+    const groupedByDate = new Map<string, { shortVolume: number; totalVolume: number }>();
+    for (const row of result) {
+      const existing = groupedByDate.get(row.date) ?? { shortVolume: 0, totalVolume: 0 };
+      existing.shortVolume += row.shortVolume;
+      existing.totalVolume += row.totalVolume;
+      groupedByDate.set(row.date, existing);
+    }
+
+    const merged: FinraShortVolumeBar[] = Array.from(groupedByDate.entries())
+      .map(([date, v]) => ({
+        date,
+        shortVolume: v.shortVolume,
+        totalVolume: v.totalVolume,
+        shortRatio: v.totalVolume > 0 ? v.shortVolume / v.totalVolume : 0,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date)) // 依日期升序排列
+      .slice(-lookbackDays); // 只取最近lookbackDays個交易日
+
+    console.log(`[FinraShortVolume] Merged ${result.length} raw rows into ${merged.length} trading days for ${symbol}`);
+
+    return merged;
   };
 
   try {
@@ -292,6 +329,65 @@ export function evalIBDDistributionDays(bars: OHLCVBar[], symbol: string = "UNKN
 // ============ Signal Evaluation Functions ============
 
 /**
+ * 還原特定指標實際用來比較的兩個點，以及該指標在這兩個點上的數值
+ * 依mode區分兩種情況：
+ * - confirmed：拿倒數兩個已確認的股價擺動高點互相比較
+ * - live：拿「今天最新K棒」跟「最後一個已確認的擺動高點」比較
+ */
+function getIndicatorSwingComparison(
+  bars: OHLCVBar[],
+  divergenceResult: DivergenceResult | null,
+  indicatorKey: "obv" | "mfi",
+  mode: DivergenceMode
+): {
+  date1: string;
+  date2: string;
+  priceAtSwing1: number;
+  priceAtSwing2: number;
+  indicatorValue1: number;
+  indicatorValue2: number;
+} | null {
+  if (!divergenceResult || !divergenceResult.swing_points || !divergenceResult.indicator_values) {
+    return null;
+  }
+
+  const confirmedHighs = divergenceResult.swing_points.filter((p) => p.type === "high");
+  if (confirmedHighs.length < 1) {
+    return null;
+  }
+
+  if (mode === "confirmed") {
+    if (confirmedHighs.length < 2) return null;
+
+    const p1 = confirmedHighs[confirmedHighs.length - 2];
+    const p2 = confirmedHighs[confirmedHighs.length - 1];
+
+    return {
+      date1: p1.date,
+      date2: p2.date,
+      priceAtSwing1: p1.price,
+      priceAtSwing2: p2.price,
+      indicatorValue1: divergenceResult.indicator_values[p1.index]?.[indicatorKey] as number,
+      indicatorValue2: divergenceResult.indicator_values[p2.index]?.[indicatorKey] as number,
+    };
+  } else {
+    // live模式：今天最新K棒 vs 最後一個已確認的擺動高點
+    const prevPoint = confirmedHighs[confirmedHighs.length - 1];
+    const latestIdx = divergenceResult.indicator_values.length - 1;
+    const latestBar = bars[bars.length - 1];
+
+    return {
+      date1: prevPoint.date,
+      date2: divergenceResult.indicator_values[latestIdx]?.date ?? latestBar.date.toString(),
+      priceAtSwing1: prevPoint.price,
+      priceAtSwing2: latestBar.high, // live模式比較用的是當天的high，不是close
+      indicatorValue1: divergenceResult.indicator_values[prevPoint.index]?.[indicatorKey] as number,
+      indicatorValue2: divergenceResult.indicator_values[latestIdx]?.[indicatorKey] as number,
+    };
+  }
+}
+
+/**
  * Signal 1: nearATH - 股價接近歷史高點
  */
 function evalNearATH(bars: OHLCVBar[], symbol: string): { detected: boolean; points: number; detail: string } {
@@ -379,12 +475,29 @@ function evalOBVDivergence(
   divergenceResult: DivergenceResult | null,
   symbol: string
 ): { detected: boolean; points: number; detail: string } {
+  const obvMatched = divergenceResult?.matched_details.find((d) => d.indicator === "OBV") ?? null;
+  const obvComparison = obvMatched
+    ? getIndicatorSwingComparison(bars, divergenceResult, "obv", obvMatched.mode)
+    : null;
+
   console.log(`[DistScore:obvDivergence] ${symbol} -`, {
     hasDivergenceResult: !!divergenceResult,
     divergence_type: divergenceResult?.divergence_type ?? "N/A",
     strength: divergenceResult?.strength ?? "N/A",
     matchedIndicators: divergenceResult?.matched_indicators ?? [],
-    obvMatchedDetail: divergenceResult?.matched_details.find((d) => d.indicator === "OBV") ?? null,
+    obvMatchedDetail: obvMatched,
+    // OBV自己實際比較的兩個點，不是頂層摘要
+    obvSwingComparison: obvComparison
+      ? {
+          mode: obvMatched?.mode,
+          date1: obvComparison.date1,
+          date2: obvComparison.date2,
+          priceAtSwing1: obvComparison.priceAtSwing1.toFixed(2),
+          priceAtSwing2: obvComparison.priceAtSwing2.toFixed(2),
+          obvValue1: obvComparison.indicatorValue1,
+          obvValue2: obvComparison.indicatorValue2,
+        }
+      : "N/A",
   });
 
   if (!divergenceResult) {
@@ -396,7 +509,6 @@ function evalOBVDivergence(
     return { detected: false, points: 0, detail: "目前無空頭背離訊號" };
   }
 
-  const obvMatched = divergenceResult.matched_details.find((d: MatchedIndicatorDetail) => d.indicator === "OBV");
   if (!obvMatched) {
     return { detected: false, points: 0, detail: "OBV未出現背離" };
   }
@@ -429,12 +541,28 @@ function evalMFIWeak(
     ? recentMFI.slice(0, -1).reduce((a, b) => a + b, 0) / (recentMFI.length - 1)
     : null;
 
+  const mfiComparison = mfiMatched
+    ? getIndicatorSwingComparison(bars, divergenceResult, "mfi", mfiMatched.mode)
+    : null;
+
   console.log(`[DistScore:mfiWeak] ${symbol} -`, {
     hasDivergenceResult: !!divergenceResult,
     divergence_type: divergenceResult?.divergence_type ?? "N/A",
     mfiMatchedDetail: mfiMatched,
     currentMFI: currentMFI?.toFixed(2) ?? "N/A",
     avgMFI: avgMFI?.toFixed(2) ?? "N/A",
+    // MFI自己實際比較的兩個點，不是頂層摘要
+    mfiSwingComparison: mfiComparison
+      ? {
+          mode: mfiMatched?.mode,
+          date1: mfiComparison.date1,
+          date2: mfiComparison.date2,
+          priceAtSwing1: mfiComparison.priceAtSwing1.toFixed(2),
+          priceAtSwing2: mfiComparison.priceAtSwing2.toFixed(2),
+          mfiValue1: mfiComparison.indicatorValue1,
+          mfiValue2: mfiComparison.indicatorValue2,
+        }
+      : "N/A",
   });
 
   // 第一層：從analyzeDivergence()結果檢查MFI是否被判定為背離指標之一（含live）
@@ -595,10 +723,10 @@ export function computeDistributionScore(
     try {
       return fn();
     } catch (e: any) {
-      console.error`[DistScore:${signalName}] ${symbol} - EXCEPTION`, {
+      console.error(`[DistScore:${signalName}] ${symbol} - EXCEPTION`, {
         message: e?.message ?? "unknown error",
         stack: e?.stack?.split("\n").slice(0, 3).join(" | "),
-      };
+      });
       return { detected: false, points: 0, detail: `計算失敗: ${e?.message ?? "unknown error"}` } as T;
     }
   }
@@ -609,9 +737,9 @@ export function computeDistributionScore(
     try {
       divergenceResult = getDivergenceAnalysis(bars, meta.symbol, meta.companyName, meta.exchange);
     } catch (e: any) {
-      console.error`[DistScore:divergenceAnalysis] ${symbol} - EXCEPTION`, {
+      console.error(`[DistScore:divergenceAnalysis] ${symbol} - EXCEPTION`, {
         message: e?.message ?? "unknown error",
-      };
+      });
     }
   }
 
@@ -679,6 +807,42 @@ export function computeDistributionScore(
  * 
  * @param ticker 股票代號
  */
+
+// Helper function to fetch Yahoo Finance chart with retry
+async function fetchChartWithRetry(
+  ticker: string,
+  period1: Date,
+  period2: Date
+): Promise<any> {
+  const attemptFetch = () =>
+    yahooFinance.chart(ticker, {
+      period1,
+      period2,
+      interval: "1d",
+    });
+
+  try {
+    return await attemptFetch();
+  } catch (firstError: any) {
+    console.error(`[DistributionScore] Yahoo Finance first attempt failed for ${ticker}:`, {
+      message: firstError?.message ?? "unknown error",
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+
+    try {
+      const retryResult = await attemptFetch();
+      console.log(`[DistributionScore] Yahoo Finance retry succeeded for ${ticker}`);
+      return retryResult;
+    } catch (secondError: any) {
+      console.error(`[DistributionScore] Yahoo Finance retry also failed for ${ticker}:`, {
+        message: secondError?.message ?? "unknown error",
+      });
+      throw secondError;
+    }
+  }
+}
+
 export async function computeDistributionScoreForTicker(
   ticker: string
 ): Promise<DistributionScoreResult> {
@@ -687,11 +851,18 @@ export async function computeDistributionScoreForTicker(
     const startDate = new Date();
     startDate.setDate(startDate.getDate() - 120); // 120 days for sufficient trading days
 
-    const chart = await yahooFinance.chart(ticker, {
-      period1: startDate,
-      period2: endDate,
-      interval: "1d",
-    });
+    let chart;
+    try {
+      chart = await fetchChartWithRetry(ticker, startDate, endDate);
+    } catch (chartError: any) {
+      console.error(`[DistributionScore] Failed to fetch price data for ${ticker} after retry:`, chartError);
+      return {
+        totalScore: 0,
+        signals: [],
+        hasShortVolumeData: false,
+        error: `無法取得${ticker}的歷史股價資料，Yahoo Finance連線逾時，請稍後再試`,
+      };
+    }
 
     const bars: OHLCVBar[] = (chart?.quotes ?? []).map((q: any) => ({
       date: q.date,
