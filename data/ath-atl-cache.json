@@ -577,6 +577,38 @@
       "peerCount": 0
     },
     {
+      "symbol": "USFD",
+      "company_name": "US Foods",
+      "exchange": "NYSE",
+      "industry": "Food Distribution",
+      "last_close": 110.5199966430664,
+      "ath_price": 110.62999725341797,
+      "ath_date": "2026-08-11",
+      "atl_price": null,
+      "atl_date": null,
+      "change_pct": 1.74,
+      "volume": 1983100,
+      "list_type": "ATH",
+      "next_earnings_date": "2026-11-05",
+      "days_to_earnings": 86,
+      "forwardPE": 20.173257838767263,
+      "pegNearTerm": 1.2687583546394505,
+      "pegLongTerm": null,
+      "nearTermGrowthPct": 15.9,
+      "longTermGrowthPct": null,
+      "priceToSales": 0.5957409,
+      "priceToBook": 5.6215663,
+      "peBookHistoricalPercentile": null,
+      "dividendYield": null,
+      "sectorCategory": "growth_consumer",
+      "primaryValuationMetric": "Forward P/E + PEG",
+      "isProfitable": true,
+      "sector": "Consumer Defensive",
+      "gicsIndustry": "Food Distribution",
+      "peerAvgForwardPE": null,
+      "peerCount": 0
+    },
+    {
       "symbol": "JLL",
       "company_name": "Jones Lang LaSalle",
       "exchange": "NYSE",
@@ -2563,5 +2595,5 @@
       "peerCount": 0
     }
   ],
-  "lastUpdated": "2026-08-12T07:00:28.960Z"
+  "lastUpdated": "2026-08-12T07:42:58.021Z"
 }

@@ -427,7 +427,34 @@ export function analyzeDivergence(
   const bearishDetails: MatchedIndicatorDetail[] = [];
   const bullishDetails: MatchedIndicatorDetail[] = [];
 
-  if (confirmedHighs.length >= 2) {
+  const latestIdx = candles.length - 1;
+  const latestIsBeyondLastConfirmedHigh =
+    confirmedHighs.length > 0 && candles[latestIdx].high > confirmedHighs[confirmedHighs.length - 1].price;
+  const latestIsBeyondLastConfirmedLow =
+    confirmedLows.length > 0 && candles[latestIdx].low < confirmedLows[confirmedLows.length - 1].price;
+
+  // ============ Bearish (高點相關指標) ============
+  // 只有今天創新高（超過最後確認高點）時才看live模式，否則只看confirmed模式
+
+  if (latestIsBeyondLastConfirmedHigh) {
+    // 今天已創新高 → 只看live模式結果，不管confirmed怎麼說
+    if (checkLiveDivergenceSmoothed(candles, indicators, confirmedHighs, "macdHistogram", true))
+      bearishDetails.push({ indicator: "MACD", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedHighs, "rsi", true))
+      bearishDetails.push({ indicator: "RSI", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedHighs, "obv", true))
+      bearishDetails.push({ indicator: "OBV", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedHighs, "mfi", true))
+      bearishDetails.push({ indicator: "MFI", pattern: "peak", mode: "live" });
+
+    // Volume背離
+    const prevHigh = confirmedHighs[confirmedHighs.length - 1];
+    const latestVolume = candles[latestIdx].volume;
+    const prevVolume = candles[prevHigh.index].volume;
+    if (latestVolume < prevVolume)
+      bearishDetails.push({ indicator: "Volume", pattern: "volume", mode: "live" });
+  } else if (confirmedHighs.length >= 2) {
+    // 今天沒有創新高 → 才用confirmed模式（兩個舊高點比較）
     if (checkPeakDivergence(buildPairs(confirmedHighs, "macdHistogram"), true))
       bearishDetails.push({ indicator: "MACD", pattern: "peak", mode: "confirmed" });
     if (checkPeakDivergence(buildPairs(confirmedHighs, "rsi"), true))
@@ -440,7 +467,28 @@ export function analyzeDivergence(
       bearishDetails.push({ indicator: "Volume", pattern: "volume", mode: "confirmed" });
   }
 
-  if (confirmedLows.length >= 2) {
+  // ============ Bullish (低點相關指標) ============
+  // 只有今天創新低（低於最後確認低點）時才看live模式，否則只看confirmed模式
+
+  if (latestIsBeyondLastConfirmedLow) {
+    // 今天已創新低 → 只看live模式結果
+    if (checkLiveDivergenceSmoothed(candles, indicators, confirmedLows, "macdHistogram", false))
+      bullishDetails.push({ indicator: "MACD", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedLows, "rsi", false))
+      bullishDetails.push({ indicator: "RSI", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedLows, "obv", false))
+      bullishDetails.push({ indicator: "OBV", pattern: "peak", mode: "live" });
+    if (checkLiveDivergence(candles, indicators, confirmedLows, "mfi", false))
+      bullishDetails.push({ indicator: "MFI", pattern: "peak", mode: "live" });
+
+    // Volume背離
+    const prevLow = confirmedLows[confirmedLows.length - 1];
+    const latestVolume = candles[latestIdx].volume;
+    const prevVolume = candles[prevLow.index].volume;
+    if (latestVolume < prevVolume)
+      bullishDetails.push({ indicator: "Volume", pattern: "volume", mode: "live" });
+  } else if (confirmedLows.length >= 2) {
+    // 今天沒有創新低 → 才用confirmed模式
     if (checkPeakDivergence(buildPairs(confirmedLows, "macdHistogram"), false))
       bullishDetails.push({ indicator: "MACD", pattern: "peak", mode: "confirmed" });
     if (checkPeakDivergence(buildPairs(confirmedLows, "rsi"), false))
@@ -453,6 +501,7 @@ export function analyzeDivergence(
       bullishDetails.push({ indicator: "Volume", pattern: "volume", mode: "confirmed" });
   }
 
+  // ============ Momentum趨緩檢查（維持獨立運作，不受live/confirmed優先順序影響）========
   if (checkMomentumSlowdown(indicators, "obv", true))
     bearishDetails.push({ indicator: "OBV", pattern: "momentum", mode: "live" });
   if (checkMomentumSlowdown(indicators, "mfi", true))
@@ -461,46 +510,6 @@ export function analyzeDivergence(
     bullishDetails.push({ indicator: "OBV", pattern: "momentum", mode: "live" });
   if (checkMomentumSlowdown(indicators, "mfi", false))
     bullishDetails.push({ indicator: "MFI", pattern: "momentum", mode: "live" });
-
-  const latestIdx = candles.length - 1;
-  const latestIsBeyondLastConfirmedHigh =
-    confirmedHighs.length > 0 && candles[latestIdx].high > confirmedHighs[confirmedHighs.length - 1].price;
-  const latestIsBeyondLastConfirmedLow =
-    confirmedLows.length > 0 && candles[latestIdx].low < confirmedLows[confirmedLows.length - 1].price;
-
-  if (latestIsBeyondLastConfirmedHigh) {
-    if (checkLiveDivergenceSmoothed(candles, indicators, confirmedHighs, "macdHistogram", true))
-      bearishDetails.push({ indicator: "MACD", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedHighs, "rsi", true))
-      bearishDetails.push({ indicator: "RSI", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedHighs, "obv", true))
-      bearishDetails.push({ indicator: "OBV", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedHighs, "mfi", true))
-      bearishDetails.push({ indicator: "MFI", pattern: "peak", mode: "live" });
-
-    const prevHigh = confirmedHighs[confirmedHighs.length - 1];
-    const latestVolume = candles[latestIdx].volume;
-    const prevVolume = candles[prevHigh.index].volume;
-    if (latestVolume < prevVolume)
-      bearishDetails.push({ indicator: "Volume", pattern: "volume", mode: "live" });
-  }
-
-  if (latestIsBeyondLastConfirmedLow) {
-    if (checkLiveDivergenceSmoothed(candles, indicators, confirmedLows, "macdHistogram", false))
-      bullishDetails.push({ indicator: "MACD", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedLows, "rsi", false))
-      bullishDetails.push({ indicator: "RSI", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedLows, "obv", false))
-      bullishDetails.push({ indicator: "OBV", pattern: "peak", mode: "live" });
-    if (checkLiveDivergence(candles, indicators, confirmedLows, "mfi", false))
-      bullishDetails.push({ indicator: "MFI", pattern: "peak", mode: "live" });
-
-    const prevLow = confirmedLows[confirmedLows.length - 1];
-    const latestVolume = candles[latestIdx].volume;
-    const prevVolume = candles[prevLow.index].volume;
-    if (latestVolume < prevVolume)
-      bullishDetails.push({ indicator: "Volume", pattern: "volume", mode: "live" });
-  }
 
   const dedupeIndicators = (details: MatchedIndicatorDetail[]) => {
     const seen = new Set<string>();

@@ -330,9 +330,8 @@ export function evalIBDDistributionDays(bars: OHLCVBar[], symbol: string = "UNKN
 
 /**
  * 還原特定指標實際用來比較的兩個點，以及該指標在這兩個點上的數值
- * 依mode區分兩種情況：
- * - confirmed：拿倒數兩個已確認的股價擺動高點互相比較
- * - live：拿「今天最新K棒」跟「最後一個已確認的擺動高點」比較
+ * 依divergence_type決定用confirmedHighs（bearish）還是confirmedLows（bullish）
+ * 依mode決定用confirmed（兩個舊擺動點互相比較）還是live（今天最新K棒vs最後一個確認擺動點）
  */
 function getIndicatorSwingComparison(
   bars: OHLCVBar[],
@@ -351,16 +350,20 @@ function getIndicatorSwingComparison(
     return null;
   }
 
-  const confirmedHighs = divergenceResult.swing_points.filter((p) => p.type === "high");
-  if (confirmedHighs.length < 1) {
+  // 關鍵修正：依divergence_type決定要看高點還是低點
+  const isBearish = divergenceResult.divergence_type === "bearish";
+  const swingType = isBearish ? "high" : "low";
+  const confirmedPoints = divergenceResult.swing_points.filter((p) => p.type === swingType);
+
+  if (confirmedPoints.length < 1) {
     return null;
   }
 
   if (mode === "confirmed") {
-    if (confirmedHighs.length < 2) return null;
+    if (confirmedPoints.length < 2) return null;
 
-    const p1 = confirmedHighs[confirmedHighs.length - 2];
-    const p2 = confirmedHighs[confirmedHighs.length - 1];
+    const p1 = confirmedPoints[confirmedPoints.length - 2];
+    const p2 = confirmedPoints[confirmedPoints.length - 1];
 
     return {
       date1: p1.date,
@@ -371,8 +374,8 @@ function getIndicatorSwingComparison(
       indicatorValue2: divergenceResult.indicator_values[p2.index]?.[indicatorKey] as number,
     };
   } else {
-    // live模式：今天最新K棒 vs 最後一個已確認的擺動高點
-    const prevPoint = confirmedHighs[confirmedHighs.length - 1];
+    // live模式：今天最新K棒 vs 最後一個已確認的擺動點
+    const prevPoint = confirmedPoints[confirmedPoints.length - 1];
     const latestIdx = divergenceResult.indicator_values.length - 1;
     const latestBar = bars[bars.length - 1];
 
@@ -380,7 +383,8 @@ function getIndicatorSwingComparison(
       date1: prevPoint.date,
       date2: divergenceResult.indicator_values[latestIdx]?.date ?? latestBar.date.toString(),
       priceAtSwing1: prevPoint.price,
-      priceAtSwing2: latestBar.high, // live模式比較用的是當天的high，不是close
+      // bearish比較用high，bullish比較用low
+      priceAtSwing2: isBearish ? latestBar.high : latestBar.low,
       indicatorValue1: divergenceResult.indicator_values[prevPoint.index]?.[indicatorKey] as number,
       indicatorValue2: divergenceResult.indicator_values[latestIdx]?.[indicatorKey] as number,
     };
