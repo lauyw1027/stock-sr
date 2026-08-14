@@ -70,21 +70,21 @@ const STYLE_CONFIGS: Record<"conservative" | "balanced" | "aggressive", { shortD
 // Default SpreadConfigs for each direction
 const DEFAULT_BEAR_CALL_CONFIG: SpreadConfig = {
   direction: "bear_call",
-  shortDeltaRange: { min: 0.20, max: 0.35 },
-  longStrikeOffsetPct: 8,
+  shortDeltaRange: { min: 0.10, max: 0.18 },
+  longStrikeOffsetPct: 4,
   minIVRank: 30,
   minROC: 25,
-  minBreakevenBufferPct: 4,
+  minBreakevenBufferPct: 6,
   minDaysToEarnings: 7,
 };
 
 const DEFAULT_BULL_PUT_CONFIG: SpreadConfig = {
   direction: "bull_put",
-  shortDeltaRange: { min: 0.20, max: 0.35 },
-  longStrikeOffsetPct: 8,
+  shortDeltaRange: { min: 0.10, max: 0.18 },
+  longStrikeOffsetPct: 4,
   minIVRank: 35, // Higher for bull_put
   minROC: 25,
-  minBreakevenBufferPct: 4,
+  minBreakevenBufferPct: 6,
   minDaysToEarnings: 7,
 };
 
@@ -517,6 +517,12 @@ export async function getOptionChainWithDelta(
     }
 
     const MIN_VALID_IV = 0.02; // 低於此門檻視為Yahoo的無效佔位值
+    const MAX_OTM_PCT = 0.20; // 履約價跟現價距離超過20%視為過深，報價可信度存疑
+    const MIN_OPEN_INTEREST = 10; // 提高門檻到10，降低單一舊倉位造成的誤判
+
+    let ivFilteredCount = 0;
+    let liquidityFilteredCount = 0;
+    let otmFilteredCount = 0;
 
     const processContracts = (contracts: any[], isPut: boolean): OptionContractWithDelta[] => {
       return contracts
@@ -525,13 +531,22 @@ export async function getOptionChainWithDelta(
           const iv = c.impliedVolatility ?? 0;
           // Yahoo 回傳的 IV 已經是小數格式（0.35 = 35%），直接使用
           if (!iv || iv < MIN_VALID_IV) {
+            ivFilteredCount++;
             return false;
           }
 
-          // 過濾條件二：至少要有基本流動性
-          // (openInterest > 0 或 bid > 0，避免選到完全沒人掛單的合約)
-          const hasLiquidity = (c.openInterest ?? 0) > 0 || (c.bid ?? 0) > 0;
+          // 過濾條件二：流動性檢查 - 提高門檻到 openInterest >= 10
+          const openInterest = c.openInterest ?? 0;
+          const hasLiquidity = openInterest >= MIN_OPEN_INTEREST || (c.bid ?? 0) > 0;
           if (!hasLiquidity) {
+            liquidityFilteredCount++;
+            return false;
+          }
+
+          // 過濾條件三：價外幅度檢查 - 避免深度價外合約報價失真
+          const otmPct = Math.abs(c.strike - currentPrice) / currentPrice;
+          if (otmPct > MAX_OTM_PCT) {
+            otmFilteredCount++;
             return false;
           }
 
@@ -555,7 +570,8 @@ export async function getOptionChainWithDelta(
     const calls = processContracts(expirationData.calls, false);
     const puts = processContracts(expirationData.puts, true);
 
-    console.log(`[OptionChain] ${symbol} calls: ${rawCallsCount} -> ${calls.length} (過濾IV異常值/無流動性後), puts: ${rawPutsCount} -> ${puts.length}`);
+    console.log(`[OptionChain] ${symbol} calls: ${rawCallsCount} -> ${calls.length}, puts: ${rawPutsCount} -> ${puts.length}`);
+    console.log(`[OptionChain] ${symbol} 過濾明細 - IV異常: ${ivFilteredCount}, 流動性不足: ${liquidityFilteredCount}, 價外過深: ${otmFilteredCount}`);
 
     if (calls.length === 0 && puts.length === 0) {
       console.warn(`[OptionChain] ${symbol} 過濾後沒有任何有效合約，可能是該股票選擇權市場本身流動性不足`);
@@ -585,11 +601,31 @@ export function selectSpreadStrikes(
   const { calls, puts } = chain;
   const { shortDeltaRange, longStrikeOffsetPct } = config;
 
+  const MAX_BID_ASK_RATIO = 3; // ask超過bid的3倍視為價差過寬，報價不可靠
+
   if (direction === "bear_call") {
     // Bear Call Spread: 賣 OTM Call (delta 在區間內，履約價 > 現價)
+    let wideBidAskFiltered = 0;
     const shortCalls = calls
-      .filter(c => c.delta >= shortDeltaRange.min && c.delta <= shortDeltaRange.max && c.strike > currentPrice)
+      .filter(c => {
+        // Delta 範圍檢查
+        if (c.delta < shortDeltaRange.min || c.delta > shortDeltaRange.max) return false;
+        if (c.strike <= currentPrice) return false;
+        
+        // bid-ask價差合理性檢查
+        if (c.bid <= 0) return false; // short leg必須有實際報價，不能是0
+        if (c.ask > 0 && c.ask / c.bid > MAX_BID_ASK_RATIO) {
+          wideBidAskFiltered++;
+          return false;
+        }
+        
+        return true;
+      })
       .sort((a, b) => Math.abs(a.delta - (shortDeltaRange.min + shortDeltaRange.max) / 2) - Math.abs(b.delta - (shortDeltaRange.min + shortDeltaRange.max) / 2));
+
+    if (wideBidAskFiltered > 0) {
+      console.log(`[CreditSpread] ${symbol}: 過濾掉 ${wideBidAskFiltered} 個bear_call bid-ask價差過寬的合約`);
+    }
 
     if (shortCalls.length === 0) {
       console.log(`[CreditSpread] 找不到符合 Delta 條件的 Short Call (bear_call)`);
@@ -613,7 +649,14 @@ export function selectSpreadStrikes(
 
     const rawNetCredit = shortCall.bid - longCall.ask;
     const rawMaxLoss = longCall.strike - shortCall.strike - rawNetCredit;
-    const rawROC = rawMaxLoss > 0 ? (rawNetCredit / rawMaxLoss) * 100 : null;
+    
+    // 檢測 maxLoss 計算是否異常（負數表示公式可能錯誤）
+    if (rawMaxLoss <= 0) {
+      console.error(`[CreditSpread] ${symbol} bear_call maxLoss 計算異常 (${rawMaxLoss.toFixed(2)})，可能是履約價方向錯誤，此筆跳過`);
+      return null;
+    }
+    
+    const rawROC = (rawNetCredit / rawMaxLoss) * 100;
     console.log(`[CreditSpread] ${symbol} bear_call raw values`, {
       shortStrike: shortCall.strike,
       shortBid: shortCall.bid,
@@ -647,9 +690,27 @@ export function selectSpreadStrikes(
     };
   } else {
     // Bull Put Spread: 賣 OTM Put (|delta| 在區間內，履約價 < 現價)
+    let wideBidAskFiltered = 0;
     const shortPuts = puts
-      .filter(p => Math.abs(p.delta) >= shortDeltaRange.min && Math.abs(p.delta) <= shortDeltaRange.max && p.strike < currentPrice)
+      .filter(p => {
+        // Delta 範圍檢查
+        if (Math.abs(p.delta) < shortDeltaRange.min || Math.abs(p.delta) > shortDeltaRange.max) return false;
+        if (p.strike >= currentPrice) return false;
+        
+        // bid-ask價差合理性檢查
+        if (p.bid <= 0) return false; // short leg必須有實際報價，不能是0
+        if (p.ask > 0 && p.ask / p.bid > MAX_BID_ASK_RATIO) {
+          wideBidAskFiltered++;
+          return false;
+        }
+        
+        return true;
+      })
       .sort((a, b) => Math.abs(Math.abs(a.delta) - (shortDeltaRange.min + shortDeltaRange.max) / 2) - Math.abs(Math.abs(b.delta) - (shortDeltaRange.min + shortDeltaRange.max) / 2));
+
+    if (wideBidAskFiltered > 0) {
+      console.log(`[CreditSpread] ${symbol}: 過濾掉 ${wideBidAskFiltered} 個bull_put bid-ask價差過寬的合約`);
+    }
 
     if (shortPuts.length === 0) {
       console.log(`[CreditSpread] 找不到符合 Delta 條件的 Short Put (bull_put)`);
@@ -672,8 +733,16 @@ export function selectSpreadStrikes(
     const longPut = longPuts[0];
 
     const rawNetCredit = shortPut.bid - longPut.ask;
-    const rawMaxLoss = longPut.strike - shortPut.strike - rawNetCredit;
-    const rawROC = rawMaxLoss > 0 ? (rawNetCredit / rawMaxLoss) * 100 : null;
+    // Bull Put: shortStrike > longStrike, maxLoss = shortStrike - longStrike - netCredit
+    const rawMaxLoss = shortPut.strike - longPut.strike - rawNetCredit;
+    
+    // 檢測 maxLoss 計算是否異常（負數表示公式可能錯誤）
+    if (rawMaxLoss <= 0) {
+      console.error(`[CreditSpread] ${symbol} bull_put maxLoss 計算異常 (${rawMaxLoss.toFixed(2)})，可能是履約價方向錯誤，此筆跳過`);
+      return null;
+    }
+    
+    const rawROC = (rawNetCredit / rawMaxLoss) * 100;
     console.log(`[CreditSpread] ${symbol} bull_put raw values`, {
       shortStrike: shortPut.strike,
       shortBid: shortPut.bid,
@@ -725,6 +794,12 @@ export function scoreSpreadCandidate(
   config: SpreadConfig
 ): number | null {
   // 硬性淘汰條件
+  // 區分「ROC 為 0」（可能是 maxLoss 計算錯誤）vs 「真的 ROC 低於門檻」
+  if (candidate.roc <= 0) {
+    console.log(`[CreditSpread] ${candidate.symbol} ROC 為 0 或負值 (${candidate.roc.toFixed(1)}%)，可能是 maxLoss 計算異常，已跳過`);
+    return null;
+  }
+  
   if (candidate.roc < config.minROC) {
     console.log(`[CreditSpread] ${candidate.symbol} ROC ${candidate.roc.toFixed(1)}% 低於門檻 ${config.minROC}%，被淘汰`);
     return null;

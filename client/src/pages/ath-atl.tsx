@@ -472,10 +472,17 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
           <div className="text-muted-foreground">Forward P/E</div>
           <div className="font-mono">{record.forwardPE !== null ? formatValuation(record.forwardPE) : "N/A"}</div>
           
-          <div className="text-muted-foreground">PEG (短期)</div>
+          <div className="text-muted-foreground">PEG(近1年)</div>
           <div className="font-mono">
             {shouldShowPEG(record.sectorCategory) && record.pegNearTerm !== null 
               ? formatValuation(record.pegNearTerm) 
+              : getPEGDisplayNote(record.sectorCategory) ?? "N/A"}
+          </div>
+          
+          <div className="text-muted-foreground">PEG(5年期)</div>
+          <div className="font-mono">
+            {shouldShowPEG(record.sectorCategory) && record.pegLongTerm !== null 
+              ? formatValuation(record.pegLongTerm) 
               : getPEGDisplayNote(record.sectorCategory) ?? "N/A"}
           </div>
           
@@ -498,13 +505,22 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
           {record.peerAvgForwardPE !== null && (
             <>
               <div className="text-muted-foreground">同業Forward P/E</div>
-              <div className="font-mono">{record.peerAvgForwardPE.toFixed(2)} (基於{record.peerCount}家)</div>
+              <div className="font-mono">
+                {record.peerAvgForwardPE.toFixed(2)} (基於{record.peerCount}家)
+                {record.peerCount < 3 && (
+                  <span className="text-xs text-amber-600 ml-1" title="樣本數不足，僅供參考">⚠️</span>
+                )}
+              </div>
             </>
           )}
         </div>
         
         <div className="pt-2 mt-2 border-t border-border">
-          <div className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground italic">
+            5年期PEG較能避免Forward P/E與近期增長率重複計算的問題，可視為較嚴謹的參考值；
+            近1年PEG資料覆蓋率較高，但Forward P/E本身已部分反映近期增長，數值可能偏低估。
+          </p>
+          <div className="text-xs text-muted-foreground mt-2">
             主要估值指標：{record.primaryValuationMetric}
           </div>
         </div>
@@ -572,6 +588,40 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
             </div>
           ))}
         </div>
+
+        {displayData.squeezeRiskWarning && (
+          <div className={`mt-2 p-2 rounded-md text-xs border ${
+            displayData.squeezeRiskWarning.riskLevel === "extreme"
+              ? "bg-red-500/10 text-red-500 border-red-500/30"
+              : "bg-amber-500/10 text-amber-500 border-amber-500/30"
+          }`}>
+            ⚠️ {displayData.squeezeRiskWarning.message}
+            {displayData.squeezeRiskWarning.percentOfFloat != null && (
+              <span className="text-muted-foreground"> ・佔流通股 {displayData.squeezeRiskWarning.percentOfFloat.toFixed(1)}%</span>
+            )}
+            <span className="text-muted-foreground"> ・結算日 {displayData.squeezeRiskWarning.settlementDate}</span>
+          </div>
+        )}
+
+        {displayData.shortInterestInfo && (
+          <div className="mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
+            <div className="flex justify-between">
+              <span>放空佔流通股比例</span>
+              <span className="font-mono">
+                {displayData.shortInterestInfo.percentOfFloat != null
+                  ? `${displayData.shortInterestInfo.percentOfFloat.toFixed(1)}%`
+                  : "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Days to Cover</span>
+              <span className="font-mono">{displayData.shortInterestInfo.daysToCover.toFixed(1)}天</span>
+            </div>
+            <div className="text-right text-muted-foreground/70 mt-0.5">
+              結算日 {displayData.shortInterestInfo.settlementDate}（每月兩次更新，可能有1-3週延遲）
+            </div>
+          </div>
+        )}
 
         {displayData.signals?.some((s: any) => s.name === "shortVolumeRatio") && (
           <p className="text-xs text-muted-foreground italic mt-2 border-t border-border pt-2">
@@ -643,10 +693,36 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
           ))}
         </div>
 
-        {displayData.signals?.some((s: any) => s.name === "shortSqueezeSetup") && (
+        {displayData.signals?.some((s: any) => s.name === "shortSqueezeSetup" || s.name === "daysToCover") && (
           <p className="text-xs text-muted-foreground italic mt-2 border-t border-border pt-2">
             高放空比例代表空頭部位擁擠，一旦股價止跌反彈，空頭被迫回補可能形成逼空。
           </p>
+        )}
+
+        {displayData.signals?.some((s: any) => s.name === "daysToCover") && (
+          <p className="text-xs text-muted-foreground italic mt-1">
+            此數據每月僅更新兩次（15日與月底結算日），可能有1-3週的延遲。
+          </p>
+        )}
+
+        {displayData.shortInterestInfo && (
+          <div className="mt-2 pt-2 border-t border-border text-xs text-muted-foreground">
+            <div className="flex justify-between">
+              <span>放空佔流通股比例</span>
+              <span className="font-mono">
+                {displayData.shortInterestInfo.percentOfFloat != null
+                  ? `${displayData.shortInterestInfo.percentOfFloat.toFixed(1)}%`
+                  : "N/A"}
+              </span>
+            </div>
+            <div className="flex justify-between">
+              <span>Days to Cover</span>
+              <span className="font-mono">{displayData.shortInterestInfo.daysToCover.toFixed(1)}天</span>
+            </div>
+            <div className="text-right text-muted-foreground/70 mt-0.5">
+              結算日 {displayData.shortInterestInfo.settlementDate}（每月兩次更新，可能有1-3週延遲）
+            </div>
+          </div>
         )}
       </div>
     );
@@ -928,11 +1004,14 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                               <TooltipProvider>
                                 <Tooltip>
                                   <TooltipTrigger className="cursor-help underline decoration-dotted decoration-muted-foreground">
-                                    PEG
+                                    PEG(近1年)
                                   </TooltipTrigger>
                                   <TooltipContent>
                                     <p className="text-xs max-w-[250px]">
-                                      股價 ÷ 預估成長率。1.0-2.0較為合理，&gt;2.5相對昂貴，&lt;1.0相對便宜。週期性/資產密集型股票的PEG參考性較低，早期虧損股不適用。
+                                      PEG = Forward P/E ÷ 未來1年預期EPS增長率。
+                                      數值參考：1.0-2.0屬合理範圍，&gt;2.5偏貴，&lt;1.0可能被低估。
+                                      此數值基於近期增長估算，Forward P/E已部分反映此增長，
+                                      可能略低估真實估值水平；點擊展開個股詳情可查看5年期PEG作為對照。
                                     </p>
                                   </TooltipContent>
                                 </Tooltip>
@@ -1142,14 +1221,14 @@ function getPercentileBadge(percentile: number | null): { text: string; classNam
                               />
                               {shouldShowPEG(record.sectorCategory) ? (
                                 <MetricWithInfo
-                                  label="PEG"
+                                  label="PEG(近1年)"
                                   value={record.pegNearTerm !== null ? formatValuation(record.pegNearTerm) : "N/A"}
-                                  explanation="股價 ÷ 預估成長率。1.0-2.0較為合理，>2.5相對昂貴，<1.0相對便宜。"
+                                  explanation="PEG = Forward P/E ÷ 未來1年預期EPS增長率。數值參考：1.0-2.0屬合理範圍，&gt;2.5偏貴，&lt;1.0可能被低估。此數值基於近期增長估算，Forward P/E已部分反映此增長，可能略低估真實估值水平；點擊展開個股詳情可查看5年期PEG作為對照。"
                                   metricKey={`${record.symbol}-peg`}
                                 />
                               ) : (
                                 <MetricWithInfo
-                                  label="PEG"
+                                  label="PEG(近1年)"
                                   value={<span className="text-muted-foreground">{getPEGDisplayNote(record.sectorCategory) ?? "N/A"}</span>}
                                   explanation={getPEGDisplayNote(record.sectorCategory) ?? "此類型不適用"}
                                   metricKey={`${record.symbol}-peg`}

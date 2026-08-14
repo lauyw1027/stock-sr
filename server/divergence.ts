@@ -75,6 +75,9 @@ export interface DivergenceResult {
   updated_at: string;
   swing_points: SwingPoint[];
   indicator_values: IndicatorValue[];
+  // 新增：保留bearish和bullish兩組完整匹配結果，不受tie-break影響
+  bearish_details: MatchedIndicatorDetail[];
+  bullish_details: MatchedIndicatorDetail[];
 }
 
 export interface ScanResult {
@@ -585,6 +588,8 @@ export function analyzeDivergence(
     divergence_type: divergenceType, strength,
     matched_indicators: matchedIndicators,
     matched_details: matchedDetails,
+    bearish_details: bearishUnique,   // 新增：不受tie-break影響，永遠是bearish方向的完整匹配清單
+    bullish_details: bullishUnique,   // 新增：同理，bullish方向完整清單
     matched_count: matchedCount,
     is_live: isLive,
     last_close: lastClose,

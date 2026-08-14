@@ -13,6 +13,7 @@ import Divergence from "@/pages/divergence";
 import CreditMonitorPage from "@/pages/CreditMonitorPage";
 import CarryTradeRiskPage from "@/pages/CarryTradeRiskPage";
 import CreditSpread from "@/pages/creditSpread";
+import SpreadScan from "@/pages/spread-scan";
 
 function AppRouter() {
   return (
@@ -24,6 +25,7 @@ function AppRouter() {
       <Route path="/credit-monitor" component={CreditMonitorPage} />
       <Route path="/carry-risk" component={CarryTradeRiskPage} />
       <Route path="/credit-spread" component={CreditSpread} />
+      <Route path="/spread-scan" component={SpreadScan} />
       <Route component={NotFound} />
     </Switch>
   );

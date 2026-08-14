@@ -1,5 +1,5 @@
 {
-  "lastUpdated": "2026-07-23T05:57:35.341Z",
+  "lastUpdated": "2026-08-12T22:00:27.447Z",
   "quarters": [
     "2026Q3"
   ],
@@ -56,6 +56,59 @@
         "arccChange": -0.47,
         "bxslChange": -0.77,
         "obdcChange": -1.1
+      }
+    },
+    {
+      "日期": "2026-08-13",
+      "季度": "2026Q3",
+      "sectorScores": {
+        "creditMarket": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "liquidityStress": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "aiInfraCore": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "chipSupplyChain": {
+          "score": 0,
+          "signal": "綠燈"
+        },
+        "privateCreditFunding": {
+          "score": 0,
+          "signal": "綠燈"
+        }
+      },
+      "weightedTotal": 0,
+      "finalSignal": "綠燈",
+      "triggeredRules": [],
+      "rawInputs": {
+        "hyOasDelta": 0.02,
+        "igOasDelta": 0.01,
+        "hygChange": 0.13,
+        "jnkChange": 0.17,
+        "lqdChange": 0.12,
+        "bklnChange": 0.1,
+        "ofrFsi": -0.7709,
+        "vix": 14.55,
+        "dxyChange": 0.16,
+        "crwvChange": 19.28,
+        "nbisChange": 34.14,
+        "orclChange": 5.36,
+        "vrtChange": 2.32,
+        "dlrChange": 3.28,
+        "eqixChange": 3.56,
+        "nvdaChange": 3.03,
+        "amdChange": 1.82,
+        "avgoChange": -0.01,
+        "tsmChange": 1.68,
+        "arccChange": -0.5,
+        "bxslChange": -0.04,
+        "obdcChange": -0.09
       }
     }
   ]

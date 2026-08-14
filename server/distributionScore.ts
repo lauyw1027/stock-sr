@@ -29,6 +29,162 @@ export interface FinraShortVolumeBar {
   shortRatio: number;
 }
 
+/**
+ * FINRA Equity Short Interest - 未平倉空頭部位快照
+ * API: https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest
+ * 公布頻率：每月兩次（15日跟月底結算日），結算後約7-10個工作日對外公布
+ */
+export interface FinraShortInterestRecord {
+  settlementDate: string;      // 結算日（15日或月底）
+  shortInterest: number;       // 未平倉空頭股數
+  avgDailyVolume: number;      // 該結算期間的平均每日成交量
+  daysToCover: number;         // shortInterest / avgDailyVolume
+  percentOfFloat: number | null; // 佔流通股比例（需要流通股數才能算，若無資料則null）
+}
+
+// 獨立快取（因為結算頻率低，不需要像daily volume那樣頻繁重抓）
+const shortInterestCache: Map<string, { data: FinraShortInterestRecord[]; cachedAt: number }> = new Map();
+const SHORT_INTEREST_CACHE_TTL_MS = 24 * 60 * 60 * 1000; // 24小時
+
+/**
+ * 從 FINRA Equity Short Interest API 取得未平倉空頭部位數據
+ * API: https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest
+ */
+export async function fetchFinraShortInterest(
+  symbol: string,
+  sharesOutstanding: number | null = null // 用於計算percentOfFloat
+): Promise<FinraShortInterestRecord[]> {
+  const cached = shortInterestCache.get(symbol);
+  const now = Date.now();
+
+  if (cached && (now - cached.cachedAt) < SHORT_INTEREST_CACHE_TTL_MS) {
+    console.log(`[FinraShortInterest] Cache hit for ${symbol}`);
+    return cached.data;
+  }
+
+  const attemptFetch = async (): Promise<FinraShortInterestRecord[]> => {
+    const endDate = new Date();
+    const startDate = new Date();
+    startDate.setMonth(startDate.getMonth() - 2); // 抓最近2個月，涵蓋至少4次結算
+
+    const formatDate = (d: Date): string => d.toISOString().slice(0, 10);
+
+    const response = await axios.post(
+      "https://api.finra.org/data/group/otcMarket/name/consolidatedShortInterest",
+      {
+        limit: 10,
+        compareFilters: [
+          {
+            compareType: "equal",
+            fieldName: "symbolCode",
+            fieldValue: symbol.toUpperCase(),
+          },
+        ],
+        dateRangeFilters: [
+          {
+            startDate: formatDate(startDate),
+            endDate: formatDate(endDate),
+            fieldName: "settlementDate",
+          },
+        ],
+      },
+      { headers: { "Content-Type": "application/json" }, timeout: 15000 }
+    );
+
+    const csvText = response.data;
+    if (typeof csvText !== "string") {
+      console.error(`[FinraShortInterest] Unexpected response type for ${symbol}:`, typeof csvText);
+      return [];
+    }
+
+    const lines = csvText.trim().split("\n");
+    if (lines.length < 2) {
+      console.log(`[FinraShortInterest] No data returned for ${symbol}`);
+      return [];
+    }
+
+    // Helper to strip double quotes
+    const stripQuotes = (value: string): string => value.trim().replace(/^"|"$/g, "");
+
+    // Parse header
+    const headers = lines[0].split(",").map((h) => stripQuotes(h));
+
+    // Find column indices - based on actual API response
+    const shortInterestIdx = headers.findIndex((h) => h === "currentShortPositionQuantity");
+    const avgDailyVolIdx = headers.findIndex((h) => h === "averageDailyVolumeQuantity");
+    const daysToCoverIdx = headers.findIndex((h) => h === "daysToCoverQuantity");
+    const settlementDateIdx = headers.findIndex((h) => h === "settlementDate");
+
+    console.log(`[FinraShortInterest] CSV header for ${symbol}:`, lines[0]);
+    console.log(`[FinraShortInterest] Parsed headers:`, headers);
+    console.log(`[FinraShortInterest] Column indices - shortInterest: ${shortInterestIdx}, avgDailyVol: ${avgDailyVolIdx}, daysToCover: ${daysToCoverIdx}, settlementDate: ${settlementDateIdx}`);
+    console.log(`[FinraShortInterest] Sample data row for ${symbol}:`, lines[1]);
+
+    if (shortInterestIdx === -1 || avgDailyVolIdx === -1) {
+      console.error(`[FinraShortInterest] Could not find expected columns for ${symbol}. Headers:`, headers);
+      return [];
+    }
+
+    // Parse CSV data rows (proper CSV parsing to handle commas inside quotes)
+    const parseCSVLine = (line: string): string[] => {
+      const result: string[] = [];
+      let current = "";
+      let inQuotes = false;
+      
+      for (let i = 0; i < line.length; i++) {
+        const char = line[i];
+        if (char === '"') {
+          inQuotes = !inQuotes;
+        } else if (char === "," && !inQuotes) {
+          result.push(stripQuotes(current));
+          current = "";
+        } else {
+          current += char;
+        }
+      }
+      result.push(stripQuotes(current));
+      return result;
+    };
+
+    const result: FinraShortInterestRecord[] = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cols = parseCSVLine(lines[i]);
+
+      if (cols.length >= headers.length) {
+        const shortInterest = parseFloat(cols[shortInterestIdx]) || 0;
+        const avgDailyVolume = parseFloat(cols[avgDailyVolIdx]) || 0;
+        const daysToCover = daysToCoverIdx !== -1 ? (parseFloat(cols[daysToCoverIdx]) || 0) : (avgDailyVolume > 0 ? shortInterest / avgDailyVolume : 0);
+        const settlementDate = settlementDateIdx !== -1 ? cols[settlementDateIdx] : cols[0];
+
+        result.push({
+          settlementDate,
+          shortInterest,
+          avgDailyVolume,
+          daysToCover,
+          percentOfFloat: sharesOutstanding && sharesOutstanding > 0
+            ? (shortInterest / sharesOutstanding) * 100
+            : null,
+        });
+      }
+    }
+
+    // Sort by settlement date ascending
+    result.sort((a, b) => a.settlementDate.localeCompare(b.settlementDate));
+
+    console.log(`[FinraShortInterest] Fetched ${result.length} records for ${symbol}`);
+    return result;
+  };
+
+  try {
+    const result = await attemptFetch();
+    shortInterestCache.set(symbol, { data: result, cachedAt: now });
+    return result;
+  } catch (e: any) {
+    console.error(`[FinraShortInterest] Failed to fetch for ${symbol}:`, e?.message ?? "unknown error");
+    return [];
+  }
+}
+
 export interface DistributionSignal {
   name: string;
   label: string;
@@ -41,6 +197,20 @@ export interface DistributionScoreResult {
   signals: DistributionSignal[];
   hasShortVolumeData: boolean;
   error?: string;
+  /** 純警示，不計入 totalScore - 用於顯示逼空風險 */
+  squeezeRiskWarning?: {
+    daysToCover: number;
+    percentOfFloat: number | null;
+    settlementDate: string;
+    riskLevel: "high" | "extreme";
+    message: string;
+  } | null;
+  /** 獨立於 squeezeRiskWarning 之外，永遠顯示（如果有資料） */
+  shortInterestInfo?: {
+    percentOfFloat: number | null;
+    daysToCover: number;
+    settlementDate: string;
+  } | null;
 }
 
 // ============ Weight Configuration (Fixed 100) ============
@@ -332,12 +502,14 @@ export function evalIBDDistributionDays(bars: OHLCVBar[], symbol: string = "UNKN
  * 還原特定指標實際用來比較的兩個點，以及該指標在這兩個點上的數值
  * 依divergence_type決定用confirmedHighs（bearish）還是confirmedLows（bullish）
  * 依mode決定用confirmed（兩個舊擺動點互相比較）還是live（今天最新K棒vs最後一個確認擺動點）
+ * 依pattern決定用peak風格（高/低點）還是momentum風格（recentWindow/priorWindow頭尾值）
  */
 function getIndicatorSwingComparison(
   bars: OHLCVBar[],
-  divergenceResult: DivergenceResult | null,
+  divergenceResult: DivergenceResult,
   indicatorKey: "obv" | "mfi",
-  mode: DivergenceMode
+  mode: DivergenceMode,
+  pattern: "peak" | "momentum" | "volume" = "peak"
 ): {
   date1: string;
   date2: string;
@@ -346,10 +518,35 @@ function getIndicatorSwingComparison(
   indicatorValue1: number;
   indicatorValue2: number;
 } | null {
-  if (!divergenceResult || !divergenceResult.swing_points || !divergenceResult.indicator_values) {
+  if (!divergenceResult.swing_points || !divergenceResult.indicator_values) {
     return null;
   }
 
+  // momentum型匹配：使用recentWindow/priorWindow兩段區間的頭尾值
+  if (pattern === "momentum") {
+    const values = divergenceResult.indicator_values;
+    const n = values.length;
+    const recentWindow = 5;
+    const priorWindow = 5;
+    if (n < recentWindow + priorWindow + 1) return null;
+
+    const priorStart = n - recentWindow - priorWindow;
+    const recentStart = n - recentWindow;
+
+    const p1 = values[priorStart];
+    const p2 = values[n - 1];
+
+    return {
+      date1: p1.date,
+      date2: p2.date,
+      priceAtSwing1: p1.price,
+      priceAtSwing2: p2.price,
+      indicatorValue1: p1[indicatorKey] as number,
+      indicatorValue2: p2[indicatorKey] as number,
+    };
+  }
+
+  // pattern === "peak" 或 "volume"：維持原有邏輯（依divergence_type切高/低點，依mode切confirmed/live）
   // 關鍵修正：依divergence_type決定要看高點還是低點
   const isBearish = divergenceResult.divergence_type === "bearish";
   const swingType = isBearish ? "high" : "low";
@@ -462,38 +659,56 @@ function isInsufficientData(result: DivergenceResult | InsufficientDataError): r
 }
 
 // Helper: Get divergence analysis result
-function getDivergenceAnalysis(bars: OHLCVBar[], symbol: string, companyName: string, exchange: string): DivergenceResult | null {
+function getDivergenceAnalysis(bars: OHLCVBar[], symbol: string, companyName: string, exchange: string): DivergenceResult | { status: "insufficient_data" | "no_divergence" } {
   const candles = barsToCandles(bars);
   const result = analyzeDivergence(symbol, companyName, exchange, "1d", candles);
   if (isInsufficientData(result)) {
-    return null;
+    return { status: result.status };
   }
   return result;
 }
 
 /**
  * Signal 3: obvDivergence - OBV 背離 (使用 divergence.ts 的 analyzeDivergence)
+ * 修正：使用bearish_details而非matched_details，避免因tie-break丟失bearish證據
  */
 function evalOBVDivergence(
   bars: OHLCVBar[],
-  divergenceResult: DivergenceResult | null,
+  divergenceResult: DivergenceResult | { status: "insufficient_data" | "no_divergence" } | null,
   symbol: string
 ): { detected: boolean; points: number; detail: string } {
-  const obvMatched = divergenceResult?.matched_details.find((d) => d.indicator === "OBV") ?? null;
+  // 區分insufficient_data跟no_divergence的訊息
+  if (!divergenceResult || "status" in divergenceResult) {
+    const statusObj = divergenceResult as { status?: string } | null;
+    const msg = statusObj?.status === "no_divergence" ? "目前無空頭背離訊號" : "資料不足，無法判斷背離";
+    return { detected: false, points: 0, detail: msg };
+  }
+
+  // 使用bearish_details而非matched_details，避免因tie-break丟失bearish證據
+  const obvMatched = divergenceResult.bearish_details.find((d) => d.indicator === "OBV") ?? null;
   const obvComparison = obvMatched
-    ? getIndicatorSwingComparison(bars, divergenceResult, "obv", obvMatched.mode)
+    ? getIndicatorSwingComparison(bars, divergenceResult, "obv", obvMatched.mode, obvMatched.pattern)
     : null;
+
+  // 計算bearish方向的強度factor（不再使用整體divergenceResult.strength）
+  const bearishCount = divergenceResult.bearish_details.length;
+  const strengthMap: Record<number, number> = { 1: 0.4, 2: 0.6, 3: 0.8, 4: 1 };
+  const strengthFactor = bearishCount >= 4 ? 1 : (strengthMap[bearishCount] ?? 0);
 
   console.log(`[DistScore:obvDivergence] ${symbol} -`, {
     hasDivergenceResult: !!divergenceResult,
-    divergence_type: divergenceResult?.divergence_type ?? "N/A",
-    strength: divergenceResult?.strength ?? "N/A",
-    matchedIndicators: divergenceResult?.matched_indicators ?? [],
+    divergence_type: divergenceResult.divergence_type,
+    strength: divergenceResult.strength,
+    // 使用bearish_details的資訊
+    bearishCount,
+    strengthFactor,
+    matchedIndicators: divergenceResult.bearish_details.map(d => d.indicator),
     obvMatchedDetail: obvMatched,
     // OBV自己實際比較的兩個點，不是頂層摘要
     obvSwingComparison: obvComparison
       ? {
           mode: obvMatched?.mode,
+          pattern: obvMatched?.pattern,
           date1: obvComparison.date1,
           date2: obvComparison.date2,
           priceAtSwing1: obvComparison.priceAtSwing1.toFixed(2),
@@ -504,39 +719,51 @@ function evalOBVDivergence(
       : "N/A",
   });
 
-  if (!divergenceResult) {
-    return { detected: false, points: 0, detail: "資料不足，無法判斷背離" };
-  }
-
-  // 只關心ATH附近的負背離（bearish），不是ATL的正背離
-  if (divergenceResult.divergence_type !== "bearish") {
-    return { detected: false, points: 0, detail: "目前無空頭背離訊號" };
-  }
-
   if (!obvMatched) {
+    // 第二層fallback：沒有正式背離匹配時，檢查OBV動能是否明顯趨緩
+    const candles = barsToCandles(bars);
+    const indicators = calculateIndicators(candles);
+    const recentOBV = indicators.slice(-10).map(d => d.obv);
+    if (recentOBV.length >= 10) {
+      const recentChange = recentOBV[9] - recentOBV[5];
+      const priorChange = recentOBV[4] - recentOBV[0];
+      if (priorChange > 0 && recentChange < priorChange * 0.3) {
+        return {
+          detected: true,
+          points: WEIGHTS.obvDivergence * 0.25,
+          detail: "OBV動能明顯趨緩（無明確背離型態）",
+        };
+      }
+    }
     return { detected: false, points: 0, detail: "OBV未出現背離" };
   }
 
   const liveTag = obvMatched.mode === "live" ? "（即時形成中）" : "（已確認）";
-  const strengthMap: Record<string, number> = { weak: 0.4, moderate: 0.6, strong: 0.8, very_strong: 1 };
-  const strengthFactor = strengthMap[divergenceResult.strength] ?? 0.5;
-
   return {
     detected: true,
     points: WEIGHTS.obvDivergence * strengthFactor,
-    detail: `OBV出現空頭背離${liveTag}，整體強度：${divergenceResult.strength}`,
+    detail: `OBV出現空頭背離${liveTag}，bearish證據數：${bearishCount}`,
   };
 }
 
 /**
  * Signal 4: mfiWeak - MFI 轉弱 (使用 divergence.ts 的 analyzeDivergence + 水位 fallback)
+ * 修正：使用bearish_details而非matched_details，避免因tie-break丟失bearish證據
  */
 function evalMFIWeak(
   bars: OHLCVBar[],
-  divergenceResult: DivergenceResult | null,
+  divergenceResult: DivergenceResult | { status: "insufficient_data" | "no_divergence" } | null,
   symbol: string
 ): { detected: boolean; points: number; detail: string } {
-  const mfiMatched = divergenceResult?.matched_details.find((d) => d.indicator === "MFI") ?? null;
+  // 區分insufficient_data跟no_divergence的訊息
+  if (!divergenceResult || "status" in divergenceResult) {
+    const statusObj = divergenceResult as { status?: string } | null;
+    const msg = statusObj?.status === "no_divergence" ? "目前無空頭背離訊號" : "資料不足，無法判斷背離";
+    return { detected: false, points: 0, detail: msg };
+  }
+
+  // 使用bearish_details而非matched_details，避免因tie-break丟失bearish證據
+  const mfiMatched = divergenceResult.bearish_details.find((d) => d.indicator === "MFI") ?? null;
   const candles = barsToCandles(bars);
   const indicators = calculateIndicators(candles);
   const recentMFI = indicators.slice(-10).map((d) => d.mfi);
@@ -546,12 +773,20 @@ function evalMFIWeak(
     : null;
 
   const mfiComparison = mfiMatched
-    ? getIndicatorSwingComparison(bars, divergenceResult, "mfi", mfiMatched.mode)
+    ? getIndicatorSwingComparison(bars, divergenceResult, "mfi", mfiMatched.mode, mfiMatched.pattern)
     : null;
+
+  // 計算bearish方向的強度factor（不再使用整體divergenceResult.strength）
+  const bearishCount = divergenceResult.bearish_details.length;
+  const strengthMap: Record<number, number> = { 1: 0.4, 2: 0.6, 3: 0.8, 4: 1 };
+  const strengthFactor = bearishCount >= 4 ? 1 : (strengthMap[bearishCount] ?? 0);
 
   console.log(`[DistScore:mfiWeak] ${symbol} -`, {
     hasDivergenceResult: !!divergenceResult,
-    divergence_type: divergenceResult?.divergence_type ?? "N/A",
+    divergence_type: divergenceResult.divergence_type,
+    // 使用bearish_details的資訊
+    bearishCount,
+    strengthFactor,
     mfiMatchedDetail: mfiMatched,
     currentMFI: currentMFI?.toFixed(2) ?? "N/A",
     avgMFI: avgMFI?.toFixed(2) ?? "N/A",
@@ -559,6 +794,7 @@ function evalMFIWeak(
     mfiSwingComparison: mfiComparison
       ? {
           mode: mfiMatched?.mode,
+          pattern: mfiMatched?.pattern,
           date1: mfiComparison.date1,
           date2: mfiComparison.date2,
           priceAtSwing1: mfiComparison.priceAtSwing1.toFixed(2),
@@ -569,15 +805,13 @@ function evalMFIWeak(
       : "N/A",
   });
 
-  // 第一層：從analyzeDivergence()結果檢查MFI是否被判定為背離指標之一（含live）
-  if (divergenceResult && divergenceResult.divergence_type === "bearish" && mfiMatched) {
+  // 第一層：從bearish_details檢查MFI是否被判定為背離指標之一（含live）
+  if (mfiMatched) {
     const liveTag = mfiMatched.mode === "live" ? "（即時形成中）" : "（已確認）";
-    const strengthMap: Record<string, number> = { weak: 0.4, moderate: 0.6, strong: 0.8, very_strong: 1 };
-    const strengthFactor = strengthMap[divergenceResult.strength] ?? 0.5;
     return {
       detected: true,
       points: WEIGHTS.mfiWeak * strengthFactor,
-      detail: `MFI出現空頭背離${liveTag}，整體強度：${divergenceResult.strength}`,
+      detail: `MFI出現空頭背離${liveTag}，bearish證據數：${bearishCount}`,
     };
   }
 
@@ -710,9 +944,49 @@ export interface DistributionScoreMeta {
   exchange: string;
 }
 
+/**
+ * 檢查逼空風險警示（純顯示，不計入 totalScore）
+ * 在 ATH 附近高 Days to Cover 代表空頭擁擠，可能反彈噴出，削弱見頂假設
+ */
+function checkSqueezeRiskWarning(
+  shortInterestData: FinraShortInterestRecord[],
+  symbol: string
+): DistributionScoreResult["squeezeRiskWarning"] {
+  if (!shortInterestData || shortInterestData.length === 0) return null;
+
+  const latest = shortInterestData[shortInterestData.length - 1];
+
+  console.log(`[DistScore:squeezeRiskWarning] ${symbol} -`, {
+    settlementDate: latest.settlementDate,
+    daysToCover: latest.daysToCover.toFixed(1),
+    percentOfFloat: latest.percentOfFloat?.toFixed(1) ?? "N/A",
+  });
+
+  if (latest.daysToCover >= 15) {
+    return {
+      daysToCover: latest.daysToCover,
+      percentOfFloat: latest.percentOfFloat,
+      settlementDate: latest.settlementDate,
+      riskLevel: "extreme",
+      message: `此股票同時有極端逼空風險（Days to Cover ${latest.daysToCover.toFixed(1)}天），見頂判斷需留意反彈噴出的可能性`,
+    };
+  } else if (latest.daysToCover >= 7) {
+    return {
+      daysToCover: latest.daysToCover,
+      percentOfFloat: latest.percentOfFloat,
+      settlementDate: latest.settlementDate,
+      riskLevel: "high",
+      message: `此股票同時有較高逼空風險（Days to Cover ${latest.daysToCover.toFixed(1)}天），見頂判斷需留意反彈噴出的可能性`,
+    };
+  }
+
+  return null;
+}
+
 export function computeDistributionScore(
   bars: OHLCVBar[],
   finraData?: FinraShortVolumeBar[],
+  shortInterestData?: FinraShortInterestRecord[],
   meta?: DistributionScoreMeta
 ): DistributionScoreResult {
   const signals: DistributionSignal[] = [];
@@ -736,7 +1010,7 @@ export function computeDistributionScore(
   }
 
   // 先計算divergence結果，供OBV和MFI訊號共用
-  let divergenceResult: ReturnType<typeof getDivergenceAnalysis> = null;
+  let divergenceResult: DivergenceResult | { status: "insufficient_data" | "no_divergence" } | null = null;
   if (meta) {
     try {
       divergenceResult = getDivergenceAnalysis(bars, meta.symbol, meta.companyName, meta.exchange);
@@ -791,7 +1065,7 @@ export function computeDistributionScore(
 
   // Signal 7: shortVolumeRatio (only if FINRA data available)
   const hasFinraData = !!finraData && finraData.length > 0;
-  const shortVolumeRatio = safeEval("shortVolumeRatio", () => evalShortVolumeRatio(finraData, symbol));
+  const shortVolumeRatio = safeEval("shortVolumeRatio", () => evalShortVolumeRatio(finraData ?? [], symbol));
   if (shortVolumeRatio.detected) {
     signals.push({ name: "shortVolumeRatio", label: "放空量大", detail: shortVolumeRatio.detail, points: shortVolumeRatio.points });
     totalPoints += shortVolumeRatio.points;
@@ -799,10 +1073,26 @@ export function computeDistributionScore(
     signals.push({ name: "shortVolumeRatio", label: "放空量大", detail: "無FINRA資料", points: 0 });
   }
 
+  // 在 totalPoints 計算完成後才執行 squeezeRiskWarning，完全隔離
+  const squeezeRiskWarning = checkSqueezeRiskWarning(shortInterestData ?? [], symbol);
+
+  // 獨立於 squeezeRiskWarning 之外，永遠顯示 shortInterestInfo
+  let shortInterestInfo: DistributionScoreResult["shortInterestInfo"] = null;
+  if (shortInterestData && shortInterestData.length > 0) {
+    const latest = shortInterestData[shortInterestData.length - 1];
+    shortInterestInfo = {
+      percentOfFloat: latest.percentOfFloat,
+      daysToCover: latest.daysToCover,
+      settlementDate: latest.settlementDate,
+    };
+  }
+
   return {
     totalScore: Math.min(100, totalPoints),
     signals,
     hasShortVolumeData: hasFinraData,
+    squeezeRiskWarning,
+    shortInterestInfo,
   };
 }
 
@@ -929,10 +1219,28 @@ export async function computeDistributionScoreForTicker(
     try {
       finraData = await fetchFinraShortVolume(ticker, 25);
     } catch (e) {
-      console.error(`[DistributionScore] FINRA data fetch failed for ${ticker}:`, e);
+      console.error(`[DistributionScore] FINRA Short Volume fetch failed for ${ticker}:`, e);
     }
 
-    const result = computeDistributionScore(bars, finraData, {
+    // Fetch sharesOutstanding for percentOfFloat calculation
+    let sharesOutstanding: number | null = null;
+    try {
+      const quote = await yahooFinance.quote(ticker);
+      sharesOutstanding = quote?.sharesOutstanding ?? null;
+      console.log(`[DistributionScore] sharesOutstanding for ${ticker}:`, sharesOutstanding);
+    } catch (e) {
+      console.error(`[DistributionScore] Failed to fetch sharesOutstanding for ${ticker}:`, e);
+    }
+
+    // Fetch FINRA Short Interest (未平倉空頭部位)
+    let shortInterestData: FinraShortInterestRecord[] = [];
+    try {
+      shortInterestData = await fetchFinraShortInterest(ticker, sharesOutstanding);
+    } catch (e) {
+      console.error(`[DistributionScore] FINRA Short Interest fetch failed for ${ticker}:`, e);
+    }
+
+    const result = computeDistributionScore(bars, finraData, shortInterestData, {
       symbol: ticker,
       companyName: ticker, // 使用ticker作為companyName佔位
       exchange: "NASDAQ",  // 預設交易所

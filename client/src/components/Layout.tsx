@@ -13,6 +13,7 @@ const NAV_LINKS = [
   { href: "/carry-risk", label: "市場風險", mobileLabel: "日圓風險" },
   { href: "/credit-monitor", label: "信用風險監控", mobileLabel: "信用監控" },
   { href: "/credit-spread", label: "期權分析", mobileLabel: "期權分析" },
+  { href: "/spread-scan", label: "價差機會", mobileLabel: "價差" },
   { href: "/about", label: "關於", mobileLabel: "關於" },
 ];
 

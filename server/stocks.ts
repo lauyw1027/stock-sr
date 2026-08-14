@@ -121,6 +121,8 @@ export interface ATHATLRecord {
   longTermGrowthPct: number | null;
   priceToSales: number | null;
   priceToBook: number | null;
+  // Approximation: assumes book value per share has been constant over the past 3 years.
+  // May not reflect accurate P/B for companies with significant share buybacks, dilutions, or rapid book value changes.
   peBookHistoricalPercentile: number | null;
   dividendYield: number | null;
   sectorCategory: SectorCategory;
@@ -171,15 +173,23 @@ function classifySectorCategory(sector: string | undefined, industry: string | u
   return "unclassified";
 }
 
+/**
+ * Get primary valuation metric label with secondary references
+ * Note: pegNearTerm is labeled as "短期動能參考" because it calculates:
+ *   PEG_NearTerm = Forward P/E ÷ near-term growth
+ * where Forward P/E already incorporates the same near-term growth expectations,
+ * resulting in "double-counting" of growth (industry debate - see Slater PEG controversy).
+ * Use pegLongTerm as the primary PEG indicator instead.
+ */
 function getPrimaryMetricLabel(category: SectorCategory): string {
   const map: Record<SectorCategory, string> = {
     mature_stable: "Forward P/E, P/B, 股息率",
     cyclical: "P/B歷史分位（PEG參考性低）",
     asset_heavy: "P/B, 股息率（PEG不適用）",
-    growth_consumer: "Forward P/E + PEG",
+    growth_consumer: "Forward P/E + PEG_LT（PEG_NT為短期動能參考）",
     growth_software: "P/S（EV/Sales等進階指標Phase 2實作，PEG常失真）",
     early_stage_loss: "P/S（PEG不適用）",
-    unclassified: "Forward P/E + PEG（預設）",
+    unclassified: "Forward P/E + PEG_LT（PEG_NT為短期動能參考，預設）",
   };
   return map[category];
 }
@@ -194,6 +204,8 @@ interface ValuationData {
   longTermGrowthPct: number | null;
   priceToSales: number | null;
   priceToBook: number | null;
+  // P/B percentile calculated using current book value as approximation for historical periods.
+  // See ATHATLRecord.peBookHistoricalPercentile for caveats.
   peBookHistoricalPercentile: number | null;
   dividendYield: number | null;
   sectorCategory: SectorCategory;
@@ -269,7 +281,13 @@ async function getValuationMetrics(
     const priceToBook = stats.defaultKeyStatistics?.priceToBook ?? null;
     const dividendYield = stats.summaryDetail?.dividendYield ?? null;
     const netIncomeToCommon = stats.defaultKeyStatistics?.netIncomeToCommon ?? null;
-    const isProfitable = netIncomeToCommon !== null ? netIncomeToCommon > 0 : null;
+    
+    // Use trailing EPS instead of single-quarter net income to determine profitability.
+    // Single-quarter net income can be distorted by one-time items (asset sales, impairments),
+    // leading to misclassification of sectorCategory and incorrect PEG calculations.
+    // trailingEps represents TTM (Trailing Twelve Months) earnings, which is more stable.
+    const trailingEps = stats.defaultKeyStatistics?.trailingEps ?? null;
+    const isProfitable = trailingEps !== null ? trailingEps > 0 : (netIncomeToCommon !== null ? netIncomeToCommon > 0 : null);
 
     const sector = stats.assetProfile?.sector ?? null;
     const industry = stats.assetProfile?.industry ?? null;
@@ -618,7 +636,11 @@ async function getPeerAvgForwardPE(symbol: string): Promise<{ peerAvgForwardPE: 
     peerPEs,
   });
 
-  const validPEs = peerPEs.filter((pe): pe is number => pe !== null && pe !== undefined && pe > 0 && isFinite(pe));
+  // Filter out invalid PEs and outliers (PE > 200 is likely due to tiny Forward EPS from near-breakeven companies)
+  const MAX_PE_THRESHOLD = 200;
+  const validPEs = peerPEs.filter((pe): pe is number => 
+    pe !== null && pe !== undefined && pe > 0 && pe <= MAX_PE_THRESHOLD && isFinite(pe)
+  );
 
   console.log(`[Peers] Valid peer Forward P/E for ${symbol}`, {
     validCount: validPEs.length,

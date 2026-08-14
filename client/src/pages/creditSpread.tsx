@@ -480,7 +480,7 @@ export default function CreditSpread() {
       <div className="mx-auto max-w-6xl px-2 sm:px-4 py-4 sm:py-6 space-y-4 sm:space-y-6">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div>
-            <h1 className="text-xl sm:text-2xl font-bold">信用價差推薦</h1>
+            <h1 className="text-xl sm:text-2xl font-bold">期權分析推薦</h1>
             <p className="text-sm text-muted-foreground">
               歷史新高 → Bear Call Spread / 歷史新低 → Bull Put Spread
             </p>

@@ -1,20 +1,20 @@
 /**
- * Test script for distribution score verification
- * Tests RVMD, CRWD, WSM, USFD to verify scores unchanged after corrections
+ * Test script for accumulation score verification
+ * Tests TTD, APTV, HONA, STWD to verify scores unchanged after corrections
  */
 
-import { computeDistributionScoreForTicker } from "./distributionScore.js";
+import { computeAccumulationScoreForTicker } from "./accumulationScore.js";
 
 async function test() {
-  const tickers = ["RVMD", "CRWD", "WSM", "USFD"];
+  const tickers = ["TTD", "APTV", "HONA", "STWD"];
   
-  console.log("=== Testing Distribution Score ===");
+  console.log("=== Testing Accumulation Score ===");
   console.log("Date:", new Date().toISOString());
   console.log("");
   
   for (const ticker of tickers) {
     console.log(`\n========== Testing ${ticker} ==========`);
-    const result = await computeDistributionScoreForTicker(ticker);
+    const result = await computeAccumulationScoreForTicker(ticker);
     console.log(`${ticker} Result:`, JSON.stringify({
       totalScore: result.totalScore,
       signals: result.signals.map(s => ({ name: s.name, points: s.points, detail: s.detail })),

@@ -17,6 +17,8 @@ import { registerCarryTradeRoutes } from "./routes/carryTrade";
 import { scanCreditSpreadOpportunities } from "./creditSpreadScanner";
 import { computeDistributionScoreForTicker } from "./distributionScore";
 import { computeAccumulationScoreForTicker } from "./accumulationScore";
+import { scanSpreadOpportunities, getCachedSpreadOpportunityResults, getOptionChainCallCount } from "./spreadOpportunityScan";
+import { scanAthAtl, scan52wAthAtl, getCachedData } from "./stocks";
 
 // yahoo-finance2 v3+ requires instantiation with new.   
 const yahooFinance = new YahooFinance();
@@ -461,14 +463,14 @@ export async function registerRoutes(
       const cached = getCachedCreditSpreadResults();
       
       if (!cached) {
-        return res.json({ found: false, reason: "尚無掃描結果，請先執行信用價差掃描" });
+        return res.json({ found: false, reason: "尚無掃描結果，請先執行期權分析掃描" });
       }
       
       const bearCallMatch = cached.bearCallSpreads?.find((c: any) => c.symbol === symbol);
       const bullPutMatch = cached.bullPutSpreads?.find((c: any) => c.symbol === symbol);
       
       if (!bearCallMatch && !bullPutMatch) {
-        return res.json({ found: false, reason: "此股票目前不在信用價差候選清單中" });
+        return res.json({ found: false, reason: "此股票目前不在期權分析候選清單中" });
       }
       
       res.json({ 
@@ -478,7 +480,93 @@ export async function registerRoutes(
       });
     } catch (e: any) {
       console.error("[API] Credit Spread single query error:", e);
-      res.status(500).json({ error: "查詢信用價差資料時發生錯誤", detail: e.message });
+      res.status(500).json({ error: "查詢期權分析資料時發生錯誤", detail: e.message });
+    }
+  });
+
+  // ============ 價差機會掃描 API ============
+  app.get("/api/spread-opportunities", async (req: Request, res: Response) => {
+    try {
+      const refresh = req.query.refresh === "true";
+      
+      // 合併 ATH + ATL + 52W ATH + 52W ATL 的所有股票作為候選池
+      let athAtlData = getCachedData();
+      if (!athAtlData) {
+        console.log("[API] SpreadOpportunities: Scanning ATH/ATL first");
+        athAtlData = await scanAthAtl(false);
+      }
+      
+      let data52w = null;
+      try {
+        data52w = await scan52wAthAtl(false);
+      } catch (e) {
+        console.warn("[API] SpreadOpportunities: 52W scan failed, using ATH/ATL only", e);
+      }
+      
+      // 合併所有股票池
+      const rawStocks = [
+        ...athAtlData.ath,
+        ...athAtlData.atl,
+        ...(data52w?.ath52w ?? []),
+        ...(data52w?.atl52w ?? []),
+      ];
+      
+      // 關鍵修正：依symbol去重，同一支股票只保留一筆
+      const allStocks = Array.from(new Map(rawStocks.map((s: any) => [s.symbol, s])).values());
+      
+      console.log(
+        `[API] SpreadOpportunities: ${rawStocks.length} raw entries -> ${allStocks.length} unique stocks in pool (去重 ${rawStocks.length - allStocks.length} 筆)`
+      );
+      
+      // 執行掃描
+      const result = await scanSpreadOpportunities(allStocks);
+      
+      res.json({
+        bestBearCalls: result.bestBearCalls,
+        bestBullPuts: result.bestBullPuts,
+        allResults: result.allResults,
+        lastUpdated: result.lastUpdated,
+        marketStatus: result.marketStatus,
+        optionChainCallCount: result.optionChainCallCount,
+      });
+    } catch (e: any) {
+      console.error("[API] Spread Opportunities error:", e);
+      res.status(500).json({ error: "Failed to scan spread opportunities", detail: e.message });
+    }
+  });
+
+  // 單股價差機會查詢
+  app.get("/api/spread-opportunities/:ticker", async (req: Request, res: Response) => {
+    try {
+      const { ticker } = req.params;
+      
+      if (!ticker) {
+        return res.status(400).json({ error: "缺少股票代號" });
+      }
+
+      const symbol = ticker.toUpperCase();
+      
+      // 從 spreadOpportunityScan 模組獲取快取結果
+      const cached = getCachedSpreadOpportunityResults();
+      
+      if (!cached) {
+        return res.json({ found: false, reason: "尚無掃描結果，請先執行價差機會掃描" });
+      }
+      
+      // 在 allResults 中查找這支股票
+      const stockResult = cached.allResults?.find((r: any) => r.symbol === symbol);
+      
+      if (!stockResult) {
+        return res.json({ found: false, reason: "此股票不在候選清單中" });
+      }
+      
+      res.json({ 
+        found: true, 
+        ...stockResult
+      });
+    } catch (e: any) {
+      console.error("[API] Spread Opportunities single query error:", e);
+      res.status(500).json({ error: "查詢價差機會資料時發生錯誤", detail: e.message });
     }
   });
 
